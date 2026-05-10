@@ -1,0 +1,599 @@
+ContextLens — Final Full Workflow Plan
+Version: FINAL | Backend: https://us-central1-contextlens-backend-001.cloudfunctions.net/api
+=============================================================
+
+OVERVIEW
+=============================================================
+
+ContextLens is a 3-layer system:
+
+  LAYER 1 — VS Code Extension     → captures coding context + AI calls
+  LAYER 2 — Firebase Backend      → stores, processes, summarizes (ALREADY DEPLOYED)
+  LAYER 3 — Web Dashboard         → browser-based viewer, opened from VS Code
+
+The developer NEVER needs to manually open a browser.
+The VS Code extension is the single entry point for everything.
+The dashboard opens automatically via a button or command.
+
+Backend base URL (DEPLOYED):
+  https://us-central1-contextlens-backend-001.cloudfunctions.net/api
+
+=============================================================
+SECTION 1: END-TO-END DEVELOPER WORKFLOW
+=============================================================
+
+This is the FULL flow a developer experiences from first install to
+reviewing their AI coding history in the dashboard.
+
+─────────────────────────────────────────────────────────────
+STEP 1 — INSTALL THE EXTENSION
+─────────────────────────────────────────────────────────────
+
+Developer installs ContextLens from VS Code Marketplace (or VSIX in hackathon).
+
+On first activation:
+  - Extension checks: is the user signed in with Google?
+  - If NO:
+      Shows a welcome notification:
+        "Welcome to ContextLens. Sign in with Google to start logging AI sessions."
+      Button: "Sign In"
+      On click: opens Firebase Auth sign-in flow via a local redirect URI
+      (VS Code extension uses vscode.env.openExternal to open a one-time
+       auth URL, user signs in in browser, token is returned to extension
+       via a local callback server on localhost:PORT or via a custom URI scheme)
+  - If YES (token cached in SecretStorage):
+      Extension activates silently
+      Shows status bar: "ContextLens: Ready"
+
+─────────────────────────────────────────────────────────────
+STEP 2 — OPEN A REPO
+─────────────────────────────────────────────────────────────
+
+Developer opens a folder/repo in VS Code.
+
+Extension auto-detects:
+  - git branch via: child_process.exec("git rev-parse --abbrev-ref HEAD")
+  - repo remote URL via: git remote get-url origin
+  - workspace folder name
+
+Extension checks Firestore:
+  - Does a project exist for this repoUrl / workspaceName?
+  - If YES: loads the existing projectId silently
+  - If NO: calls POST /projects/create automatically
+    Body: { name: workspaceName, repoUrl: remoteUrl }
+    Stores returned projectId in extension workspace state
+
+Status bar updates to:
+  "ContextLens: {projectName} · No active episode"
+
+─────────────────────────────────────────────────────────────
+STEP 3 — CREATE AN EPISODE
+─────────────────────────────────────────────────────────────
+
+An episode = one focused coding task (e.g. "Refactor Auth Middleware").
+
+Developer triggers this via:
+  - Sidebar "New Episode" button
+  - Command palette: "ContextLens: New Episode"
+
+Extension prompts:
+  - Quick input box: "Episode label?" (e.g. "Add Rate Limiting")
+
+Extension then calls:
+  POST /episodes/create
+  Body: {
+    projectId: <currentProjectId>,
+    label: "Add Rate Limiting",
+    branch: <currentBranch>   // auto-detected from git
+  }
+  Returns: { episodeId: "ep_abc123" }
+
+Extension stores episodeId in workspace state.
+
+Status bar updates to:
+  "ContextLens: Add Rate Limiting · 0 calls · feature/auth-v2"
+
+Sidebar State Header panel updates:
+  - Episode: "Add Rate Limiting"
+  - Branch: feature/auth-v2
+  - Calls: 0
+  - Changed files: (none yet)
+
+─────────────────────────────────────────────────────────────
+STEP 4 — USE AI INSIDE VS CODE (GEMINI NATIVE CHAT)
+─────────────────────────────────────────────────────────────
+
+Developer uses the ContextLens Gemini Chat panel (Sidebar Panel 2).
+
+Flow per message:
+  1. Developer types a prompt in the chat input.
+     Optional: adds an intent tag like "Clean up token logic"
+  2. Before sending, extension captures:
+       - branchName (git)
+       - activeFilePath (vscode.window.activeTextEditor.document.fileName)
+       - relatedFiles (currently open editors)
+       - diffSnapshot (git diff HEAD -- <activeFile>)
+       - todoMatches (regex scan for TODO/FIXME in activeFile)
+  3. Extension sends all of this to backend:
+       POST /calls/log
+       Body: {
+         projectId, episodeId,
+         intentTag, promptText,
+         context: { branchName, activeFilePath, relatedFiles, diffSnapshot, todoMatches }
+       }
+  4. Backend:
+       - Stores call in Firestore under calls/{callId}
+       - Sends prompt + context to Gemini
+       - Returns model response
+       - Updates episode.callCount, episode.changedFiles in Firestore
+  5. Extension:
+       - Displays model response in the chat panel
+       - Updates sidebar call count
+       - Status bar increments: "Add Rate Limiting · 3 calls"
+
+Developer sees the AI response exactly in VS Code — no tab-switching needed.
+
+─────────────────────────────────────────────────────────────
+STEP 5 — LOG EXTERNAL AI CALLS (Claude / Copilot / ChatGPT)
+─────────────────────────────────────────────────────────────
+
+Developer was using Claude or ChatGPT in the browser.
+They want to keep that conversation in their episode history.
+
+They trigger:
+  - Command palette: "ContextLens: Log External AI Call"
+  - OR click "Log External Call" button in the sidebar
+
+Extension opens a multi-step Quick Pick / Webview form:
+  Field 1: "AI Tool used?" (dropdown: Claude / ChatGPT / Copilot / Other)
+  Field 2: "Intent tag?" (e.g. "Claude design discussion for auth")
+  Field 3: "Paste your prompt or key question"
+  Field 4: "Paste the AI response or key decisions from it"
+  Field 5: "Relevant files?" (pre-filled with currently open file)
+  [Save] button
+
+On save, extension captures SAME git context as any other call:
+  - branchName, activeFilePath, diffSnapshot, todoMatches
+
+Then calls POST /calls/log with:
+  source: "manual_log"
+  modelName: "claude-3" (or whatever user selected)
+  intentTag, promptText, modelResponse: (pasted by user)
+  + same context block as native call
+
+This call is now stored as a first-class call inside the episode.
+It appears in the dashboard timeline exactly like a Gemini call,
+clearly labeled with the source badge (e.g. "claude" vs "gemini").
+
+─────────────────────────────────────────────────────────────
+STEP 6 — VIEW CURRENT EPISODE STATE IN SIDEBAR
+─────────────────────────────────────────────────────────────
+
+The Sidebar has 2 panels:
+
+PANEL 1 — State Header (always visible)
+  Shows:
+    Episode: Add Rate Limiting        [active]
+    Branch: feature/auth-v2
+    AI Calls: 4
+    Changed Files:
+      • src/middleware/rateLimit.ts
+      • src/app.ts
+    Manual Notes: (editable inline text field)
+
+  Buttons:
+    [New Episode]     — closes current, starts new
+    [Close Episode]   — marks episode as closed
+    [Explain Diff]    — see Step 7
+    [Open Dashboard]  — see Step 8  ← KEY ACTION
+
+PANEL 2 — Gemini Chat (collapsible)
+  Shows:
+    Intent tag field (optional)
+    Message input
+    Last 3-5 messages in the current episode
+    [Send] button
+
+─────────────────────────────────────────────────────────────
+STEP 7 — EXPLAIN DIFF (FROM VS CODE)
+─────────────────────────────────────────────────────────────
+
+Developer clicks [Explain Diff] in the Sidebar State Header.
+
+Extension calls:
+  POST /episodes/explain
+  Body: { projectId, episodeId }
+
+Backend:
+  - Assembles diffs + intent tags + files from all calls in this episode
+  - Calls Gemini with the Explain Diff prompt
+  - Returns: { summary, risks[], checks[] }
+  - Stores result back on the episode doc in Firestore
+
+Extension displays the result in a VS Code webview panel or notification:
+  ─────────────────────────────
+  ✦ Gemini Diff Analysis
+  ─────────────────────────────
+  Summary:
+  [Extracted token validation logic into reusable helpers...]
+
+  ⚠ Potential Risks:
+  • Possible regression in expired token handling
+
+  ✓ Suggested Checks:
+  • Add tests for missing Authorization header
+  • Verify all protected routes use new middleware
+  ─────────────────────────────
+  [Copy Summary]  [Open in Dashboard]
+
+─────────────────────────────────────────────────────────────
+STEP 8 — OPEN DASHBOARD FROM VS CODE
+─────────────────────────────────────────────────────────────
+
+This is how developers access the full dashboard.
+They NEVER need to manually navigate to the URL.
+
+Two triggers:
+
+  A) Sidebar button [Open Dashboard]
+       → Opens: https://contextlens.web.app/dashboard/{projectId}
+         (deep link to current project's episode timeline)
+
+  B) Command palette: "ContextLens: Open Dashboard"
+       → Opens: https://contextlens.web.app/dashboard/{projectId}
+
+  C) After Explain Diff result: [Open in Dashboard] button
+       → Opens: https://contextlens.web.app/dashboard/{projectId}/episodes/{episodeId}
+         (deep link directly to the episode detail page)
+
+  D) Status bar click
+       → Opens: https://contextlens.web.app/dashboard/{projectId}
+
+Implementation in extension (apiClient.ts or command handler):
+  vscode.env.openExternal(
+    vscode.Uri.parse(
+      `https://contextlens.web.app/dashboard/${projectId}/episodes/${episodeId}`
+    )
+  )
+
+The dashboard URL is constructed from:
+  - Base dashboard URL (stored in extension config)
+  - projectId (from workspace state)
+  - episodeId (from workspace state, optional for episode deep-link)
+
+Auth in the dashboard:
+  - Developer is already signed in with the SAME Google account
+    used to sign into the extension.
+  - Firebase Auth persists the session in the browser.
+  - On first ever dashboard open: Google sign-in screen appears once.
+  - After that: automatic, seamless.
+
+─────────────────────────────────────────────────────────────
+STEP 9 — DEVELOPER BROWSES THE DASHBOARD
+─────────────────────────────────────────────────────────────
+
+The dashboard (Firebase Hosting) opens showing:
+
+IF opened via project deep-link (/dashboard/:projectId):
+  → Lands on ProjectPage
+  → Sees full episode timeline for current project
+  → Can filter by branch, date, file
+  → Each episode card expands to show all AI calls with diffs
+  → Can click into any episode for full detail
+
+IF opened via episode deep-link (/dashboard/:projectId/episodes/:episodeId):
+  → Lands directly on EpisodeDetailPage
+  → Sees all calls for that episode with prompts, responses, diffs
+  → Explain Diff result is already shown (backend wrote it to Firestore in Step 7)
+  → Can navigate to Branch page from sidebar
+
+Branch page (/dashboard/:projectId/branch/:branchName):
+  → Click [Summarize Branch]
+  → Gets a full PR-style narrative of everything done on that branch
+  → [Copy as PR Description] for instant use in GitHub
+
+─────────────────────────────────────────────────────────────
+STEP 10 — CLOSE EPISODE + START NEXT
+─────────────────────────────────────────────────────────────
+
+Developer clicks [Close Episode] in the sidebar.
+
+Extension calls:
+  POST /episodes/close
+  Body: { episodeId }
+
+Status bar updates to:
+  "ContextLens: {projectName} · No active episode"
+
+Developer starts the next task → [New Episode] → repeat from Step 3.
+
+=============================================================
+SECTION 2: BACKEND ENDPOINT MAPPING
+=============================================================
+
+All calls go to:
+  https://us-central1-contextlens-backend-001.cloudfunctions.net/api
+
+Every request includes:
+  Authorization: Bearer {Firebase ID token}
+  Content-Type: application/json
+
+Endpoint                   Method   Caller       When
+─────────────────────────────────────────────────────────────────
+/projects/create           POST     Extension    On workspace open (if project doesn't exist)
+/episodes/create           POST     Extension    On "New Episode" action
+/calls/log                 POST     Extension    On every Gemini chat send + manual log
+/episodes/explain          POST     Extension    On "Explain Diff" click in sidebar
+/episodes/close            POST     Extension    On "Close Episode" click
+/branches/summarize        POST     Dashboard    On "Summarize Branch" click in browser
+/search                    POST     Dashboard    On search input in browser
+
+Extension DOES call:
+  /projects/create
+  /episodes/create
+  /calls/log
+  /episodes/explain
+  /episodes/close
+
+Dashboard DOES call:
+  /branches/summarize
+  /search
+
+Dashboard READS from:
+  Firestore directly (no extra API needed for reading data)
+
+=============================================================
+SECTION 3: DATA FLOW DIAGRAM (TEXT FORMAT)
+=============================================================
+
+Developer types prompt in VS Code Gemini Chat
+        │
+        ▼
+Extension captures: branch, file, diff, todos, intent
+        │
+        ▼
+POST /calls/log → Backend → Gemini → returns response
+        │                │
+        │                ▼
+        │         Firestore writes:
+        │         calls/{callId}
+        │         episode.callCount++
+        │         episode.changedFiles[]
+        │
+        ▼
+Extension shows response in chat panel
+Status bar increments call count
+        │
+        ▼
+Developer clicks [Explain Diff]
+        │
+        ▼
+POST /episodes/explain → Backend → Gemini
+        │                │
+        │                ▼
+        │         Firestore writes:
+        │         episode.explainDiffSummary
+        │         episode.explainDiffRisks[]
+        │         episode.explainDiffChecks[]
+        │
+        ▼
+Extension shows summary in webview panel
+        │
+        ▼
+Developer clicks [Open Dashboard]
+        │
+        ▼
+vscode.env.openExternal(
+  "https://contextlens.web.app/dashboard/{projectId}/episodes/{episodeId}"
+)
+        │
+        ▼
+Browser opens → Firebase Auth (already signed in)
+        │
+        ▼
+Dashboard reads from Firestore (onSnapshot — live)
+        │
+        ▼
+Developer sees: episode timeline, calls, diffs, summaries
+
+=============================================================
+SECTION 4: EXTENSION CONFIG VALUES TO STORE
+=============================================================
+
+These must be stored in extension global/workspace state:
+
+  GLOBAL STATE (persists across workspaces):
+    authToken: string           // Firebase ID token
+    refreshToken: string        // For token renewal
+    uid: string                 // Firebase UID
+    userEmail: string
+    dashboardBaseUrl: string    // "https://contextlens.web.app"
+    apiBaseUrl: string          // "https://us-central1-contextlens-backend-001.cloudfunctions.net/api"
+
+  WORKSPACE STATE (per open folder):
+    projectId: string           // From /projects/create response
+    projectName: string
+    activeEpisodeId: string | null
+    activeEpisodeLabel: string | null
+    lastDiffHash: string        // Dedup repeated diffs
+
+  SECRET STORAGE (secure, encrypted by VS Code):
+    Firebase tokens → use vscode.SecretStorage API
+
+=============================================================
+SECTION 5: OPEN DASHBOARD — EXACT IMPLEMENTATION
+=============================================================
+
+In the extension command handler (commands/openDashboard.ts):
+
+import * as vscode from 'vscode'
+import { getWorkspaceState } from '../state/workspaceState'
+
+export async function openDashboard(
+  context: vscode.ExtensionContext,
+  target: 'project' | 'episode' | 'branch'
+) {
+  const state = getWorkspaceState(context)
+  const base = 'https://contextlens.web.app'
+
+  let url: string
+
+  if (target === 'episode' && state.activeEpisodeId) {
+    url = `${base}/dashboard/${state.projectId}/episodes/${state.activeEpisodeId}`
+  } else if (target === 'branch' && state.currentBranch) {
+    url = `${base}/dashboard/${state.projectId}/branch/${encodeURIComponent(state.currentBranch)}`
+  } else {
+    url = `${base}/dashboard/${state.projectId}`
+  }
+
+  await vscode.env.openExternal(vscode.Uri.parse(url))
+}
+
+Registered commands:
+  'contextlens.openDashboard'         → target: 'project'
+  'contextlens.openDashboardEpisode'  → target: 'episode'
+  'contextlens.openDashboardBranch'   → target: 'branch'
+
+Sidebar button [Open Dashboard] → calls 'contextlens.openDashboardEpisode'
+  (so it deep-links to the active episode every time)
+
+Status bar click → calls 'contextlens.openDashboard'
+  (project-level view)
+
+Post-Explain Diff "Open in Dashboard" → calls 'contextlens.openDashboardEpisode'
+
+=============================================================
+SECTION 6: SIDEBAR STATE HEADER — FULL SPEC
+=============================================================
+
+File: src/stateTreeProvider.ts (TreeDataProvider)
+
+Tree items to show (in order):
+
+  ─── EPISODE ──────────────────────────────
+  📁 Add Rate Limiting                [ACTIVE]
+     ↳ Branch: feature/auth-v2
+     ↳ AI Calls: 4
+     ↳ Since: 2 hours ago
+
+  ─── FILES CHANGED ────────────────────────
+  📄 src/middleware/rateLimit.ts
+  📄 src/app.ts
+
+  ─── ACTIONS ──────────────────────────────
+  [＋ New Episode]
+  [✕ Close Episode]
+  [✦ Explain Diff]
+  [⎋ Open Dashboard]        ← primary CTA
+
+  ─── NOTES ────────────────────────────────
+  (inline editable text field for manual notes)
+
+When no active episode:
+  ─── NO ACTIVE EPISODE ────────────────────
+  [＋ New Episode]
+  [⎋ Open Dashboard]
+
+When not signed in:
+  ─── NOT SIGNED IN ────────────────────────
+  [Sign in with Google]
+
+=============================================================
+SECTION 7: DASHBOARD URL STRUCTURE
+=============================================================
+
+Page                    URL
+─────────────────────────────────────────────────────────────
+Home                    /dashboard
+Project timeline        /dashboard/:projectId
+Episode detail          /dashboard/:projectId/episodes/:episodeId
+Branch view             /dashboard/:projectId/branch/:branchName
+Settings                /dashboard/settings
+
+All deep-links from the extension go to specific project/episode/branch URLs.
+Firebase Hosting is configured as SPA (/** → /index.html) so all routes work.
+
+=============================================================
+SECTION 8: AUTH FLOW BETWEEN EXTENSION AND DASHBOARD
+=============================================================
+
+SAME Google account is used for both extension and dashboard.
+There is NO separate login for dashboard if developer already signed in.
+
+How it works:
+
+1. Developer signs into extension with Google (Step 1 above).
+   Firebase Auth stores the session in the browser's localStorage/IndexedDB.
+
+2. Developer clicks [Open Dashboard].
+   Browser opens to: https://contextlens.web.app/dashboard/:projectId
+
+3. Dashboard checks Firebase Auth session (onAuthStateChanged).
+   Session exists → user is auto-authenticated → data loads immediately.
+
+4. If session expired (rare):
+   Dashboard shows Google sign-in screen once.
+   Developer clicks "Sign in with Google" → re-authenticated.
+   Same uid → same data.
+
+The developer experience is:
+  Click button in VS Code → browser opens → data is already there. Done.
+
+=============================================================
+SECTION 9: DEMO RUN ORDER (HACKATHON)
+=============================================================
+
+This is the exact sequence to demonstrate ContextLens on stage:
+
+00:00 — Show VS Code with a repo open
+  "This is our dev working on an auth feature."
+
+00:15 — Create episode "Refactor Auth Middleware" in sidebar
+  Show status bar update. Call count = 0.
+  "A developer starts a task — an episode."
+
+00:30 — Send 1-2 Gemini messages in the chat panel
+  Show: prompt, response, call count increments.
+  "Every AI call is logged automatically with the current diff and file context."
+
+01:00 — Click [Explain Diff]
+  Show the summary result appear in VS Code.
+  "ContextLens asks Gemini to explain what changed, what risks exist, and what to test."
+
+01:30 — Click [Open Dashboard]
+  Browser opens directly to the episode detail page.
+  Show: timeline, all calls, diffs, Explain Diff result already rendered.
+  "The full history — one click from VS Code."
+
+01:50 — Navigate to Branch page, click [Summarize Branch]
+  Show: instant PR-style summary, [Copy as PR Description] button.
+  "One click gives you a full PR narrative."
+
+02:00 — Show seeded demo project with 3-4 episodes and multiple branches
+  "Over a week of AI-assisted work — all organized, searchable, explainable."
+
+=============================================================
+SECTION 10: ENV VARS AND DEPLOYMENT CHECKLIST
+=============================================================
+
+Extension (settings.json or hardcoded in production build):
+  API_BASE_URL:       https://us-central1-contextlens-backend-001.cloudfunctions.net/api
+  DASHBOARD_BASE_URL: https://contextlens.web.app
+  (Firebase config values for Auth)
+
+Dashboard .env file:
+  VITE_FIREBASE_API_KEY=
+  VITE_FIREBASE_AUTH_DOMAIN=
+  VITE_FIREBASE_PROJECT_ID=
+  VITE_FIREBASE_STORAGE_BUCKET=
+  VITE_FIREBASE_MESSAGING_SENDER_ID=
+  VITE_FIREBASE_APP_ID=
+  VITE_API_BASE_URL=https://us-central1-contextlens-backend-001.cloudfunctions.net/api
+
+Deploy dashboard:
+  npm run build
+  firebase deploy --only hosting
+
+=============================================================
+END OF FINAL WORKFLOW PLAN
+=============================================================
