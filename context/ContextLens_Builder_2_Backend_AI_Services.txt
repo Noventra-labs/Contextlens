@@ -1,0 +1,210 @@
+ContextLens - Builder Spec 2 - Backend, Firestore, and AI Services
+
+Role
+You are responsible for building the complete backend, database model, API layer, and Gemini-powered service logic for ContextLens.
+
+Product Context
+ContextLens is an AI workflow memory layer for coding. It stores AI-assisted coding sessions as episodes, each linked to branch, file, diff, prompt, response, and summaries.
+
+Your Ownership
+- Firebase backend
+- Firebase Auth integration
+- Firestore schema
+- Firebase Functions or Cloud Run endpoints
+- Gemini integration through Firebase AI Logic
+- Security rules
+- Structured JSON outputs for explain/summarize features
+- Caching and error handling
+
+Do Not Build
+- VS Code extension UI
+- Dashboard UI
+- Client-side extension state management
+- Design polish
+
+Core Objectives
+- Persist projects, episodes, and calls securely.
+- Accept AI requests from extension and return model output.
+- Generate Explain Diff summaries.
+- Generate Branch Summary outputs.
+- Expose stable contracts for extension and dashboard.
+
+Data Model
+1. users/{uid}
+Fields:
+- displayName
+- email
+- photoURL
+- createdAt
+
+2. users/{uid}/projects/{projectId}
+Fields:
+- name
+- repoUrl
+- localWorkspaceName
+- defaultBranch
+- createdAt
+- updatedAt
+- settings.preferredModel
+- settings.redactionEnabled
+- settings.autoSummariesEnabled
+
+3. users/{uid}/projects/{projectId}/episodes/{episodeId}
+Fields:
+- label
+- branchName
+- status
+- startedAt
+- endedAt
+- callCount
+- changedFiles
+- latestDiffHash
+- manualNotes
+- episodeSummary
+- explainDiffSummary
+- explainDiffRisks
+- explainDiffChecks
+
+4. users/{uid}/projects/{projectId}/episodes/{episodeId}/calls/{callId}
+Fields:
+- createdAt
+- source
+- intentTag
+- promptText
+- modelName
+- modelResponse
+- branchName
+- activeFilePath
+- relatedFiles
+- diffSnapshot
+- diffHash
+- todoMatches
+- latencyMs
+- tokenUsage
+- status
+
+Required Endpoints
+1. POST /projects/create
+Purpose:
+- Create project from repo information
+Response:
+- project id
+
+2. POST /episodes/create
+Purpose:
+- Start new episode for a project and branch
+Response:
+- episode id
+
+3. POST /calls/log
+Purpose:
+- Accept prompt + context from extension
+- Send to Gemini
+- Store prompt/response/metadata
+Response:
+- call id
+- model name
+- model response
+- latency
+- saved flag
+
+4. POST /episodes/explain
+Purpose:
+- Explain the accumulated diff for an episode
+Response JSON:
+- summary
+- risks[]
+- checks[]
+
+5. POST /branches/summarize
+Purpose:
+- Summarize ordered episodes on a branch
+Response JSON:
+- pr_summary
+- key_changes[]
+- review_risks[]
+
+6. POST /search
+Purpose:
+- Search episodes and calls by query and filters
+
+7. POST /episodes/close
+Purpose:
+- Mark episode as closed
+
+AI Tasks
+1. Chat Request Path
+- Accept prompt and coding context from extension.
+- Route to Gemini.
+- Store prompt, response, metadata, and latency.
+- Return response payload to extension.
+
+2. Explain Diff
+- Aggregate diff + intents + files.
+- Return strict JSON:
+  - summary
+  - risks
+  - checks
+
+3. Branch Summary
+- Aggregate ordered episode summaries and changed files.
+- Return strict JSON:
+  - pr_summary
+  - key_changes
+  - review_risks
+
+Prompting Requirements
+Explain Diff prompt should focus on:
+- What changed
+- Why it likely changed
+- What might break
+- What should be tested
+
+Branch Summary prompt should focus on:
+- What the PR does
+- Key changes
+- Review risks
+
+Security Requirements
+- Firebase-authenticated requests only.
+- Per-user data isolation.
+- Firestore rules scoped by uid.
+- Gemini key must remain server-side only.
+- Add redaction support for likely secrets in diffs/prompts.
+
+Reliability Requirements
+- Retry-safe writes.
+- Cache repeat Explain Diff calls by episodeId + diffHash.
+- Return typed error objects.
+- Handle:
+  - auth failure
+  - invalid project/episode
+  - empty diff
+  - model timeout
+  - quota exceeded
+  - write failure
+
+Suggested Firestore Security Rules Shape
+- Only authenticated user can read/write under their own uid path.
+- Explicitly cover nested projects, episodes, and calls.
+
+Acceptance Criteria
+- Extension can log a call and receive stored response.
+- Episode documents update callCount correctly.
+- Explain Diff returns valid structured output.
+- Branch Summary returns PR-style structured output.
+- Search returns matching episodes/calls.
+- Firestore rules prevent cross-user access.
+
+Implementation Notes
+- Use structured JSON outputs wherever possible.
+- Keep contracts stable and documented.
+- Make the extension and dashboard builders' jobs easy.
+- Optimize for MVP reliability over complex architecture.
+
+Deliverables
+- Working Firebase backend or Cloud Run service
+- Firestore schema and security rules
+- API endpoints
+- Gemini service logic and prompt templates
+- Minimal API documentation for extension and dashboard builders

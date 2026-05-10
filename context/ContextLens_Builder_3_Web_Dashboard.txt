@@ -1,0 +1,1041 @@
+ContextLens - Builder Spec 3 - Web Dashboard and Demo Polish
+Version: 3.0 | Stack: Vite + React + TypeScript + Tailwind CSS + Firebase Hosting
+Replaces all previous Next.js dashboard specs.
+
+=============================================================
+ROLE
+=============================================================
+
+You are responsible for building the full web dashboard and all
+demo-facing polish for ContextLens.
+
+Product Context:
+ContextLens is an AI workflow memory layer for coding. It captures
+AI-assisted coding sessions as episodes and visualizes them as a
+searchable timeline with diffs, prompts, responses, and summaries.
+
+Your Ownership:
+- Vite + React dashboard (replaces Next.js — too heavy for this scope)
+- Project overview UI
+- Branch navigation UI
+- Episode timeline UI
+- Episode detail pages
+- Branch summary pages
+- Search and filter UX
+- Copy/export UX
+- Visual polish for judges/demo
+
+Do Not Build:
+- VS Code extension commands
+- Git capture logic
+- Backend business logic
+- Firebase Functions or Gemini prompts
+- Firestore security rules (already deployed)
+- Auth token handling inside VS Code
+
+Core Objectives:
+- Make the product legible and impressive in under 2 minutes.
+- Let users inspect project history through episodes and calls.
+- Present Explain Diff and Branch Summary results beautifully.
+- Make the dashboard feel premium and trustworthy.
+
+=============================================================
+SECTION 1: TECH STACK
+=============================================================
+
+Framework:       Vite + React 18 + TypeScript
+Styling:         Tailwind CSS v3
+Routing:         react-router-dom v6
+Auth:            Firebase Auth — Google Sign-In (firebase/auth)
+Database reads:  Firestore client SDK (firebase/firestore)
+API calls:       fetch() with Firebase ID token in Authorization header
+Diff viewer:     react-diff-viewer-continued
+Hosting:         Firebase Hosting
+State:           React Context + useState/useEffect
+Icons:           lucide-react
+Fonts:           Geist Sans (body) + Geist Mono (code/labels)
+
+Why not Next.js:
+- This is a pure client SPA reading from Firestore + calling HTTP endpoints.
+- No SSR, no server components, no getServerSideProps needed.
+- Vite is faster to develop with, lighter to build, and deploys identically
+  to Firebase Hosting with a single: npm run build && firebase deploy
+
+=============================================================
+SECTION 2: PROJECT SETUP
+=============================================================
+
+Step 1 — Scaffold
+  npm create vite@latest contextlens-dashboard -- --template react-ts
+  cd contextlens-dashboard
+  npm install
+
+Step 2 — Install all dependencies
+  npm install firebase react-router-dom
+  npm install tailwindcss postcss autoprefixer
+  npm install lucide-react react-diff-viewer-continued geist
+  npm install -D @types/react @types/react-dom
+
+Step 3 — Init Tailwind
+  npx tailwindcss init -p
+  In tailwind.config.js set content:
+    ["./index.html", "./src/**/*.{ts,tsx}"]
+  In src/index.css add:
+    @tailwind base;
+    @tailwind components;
+    @tailwind utilities;
+
+Step 4 — Firebase config file: src/lib/firebase.ts
+  import { initializeApp } from "firebase/app"
+  import { getAuth } from "firebase/auth"
+  import { getFirestore } from "firebase/firestore"
+
+  const firebaseConfig = {
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  }
+
+  const app = initializeApp(firebaseConfig)
+  export const auth = getAuth(app)
+  export const db = getFirestore(app)
+
+Step 5 — Environment variables: create .env file
+  VITE_FIREBASE_API_KEY=
+  VITE_FIREBASE_AUTH_DOMAIN=
+  VITE_FIREBASE_PROJECT_ID=
+  VITE_FIREBASE_STORAGE_BUCKET=
+  VITE_FIREBASE_MESSAGING_SENDER_ID=
+  VITE_FIREBASE_APP_ID=
+  VITE_API_BASE_URL=https://<your-deployed-backend-url>
+
+  Also create .env.example with same keys but empty values.
+
+Step 6 — Firebase Hosting setup
+  firebase init hosting
+  Set public directory: dist
+  Configure as SPA: Yes (rewrites /** to /index.html)
+  Deploy: npm run build && firebase deploy
+
+=============================================================
+SECTION 3: FILE STRUCTURE
+=============================================================
+
+src/
+  lib/
+    firebase.ts          # Firebase app, auth, db exports
+    api.ts               # All fetch wrappers for backend endpoints
+    firestoreHooks.ts    # Custom React hooks for Firestore reads
+    utils.ts             # formatDate, timeAgo, copyToClipboard helpers
+  context/
+    AuthContext.tsx       # Google auth state, signIn, signOut
+  routes/
+    index.tsx             # Full router setup with ProtectedRoute
+  pages/
+    LoginPage.tsx         # /login
+    HomePage.tsx          # /dashboard
+    ProjectPage.tsx       # /dashboard/:projectId
+    EpisodeDetailPage.tsx # /dashboard/:projectId/episodes/:episodeId
+    BranchPage.tsx        # /dashboard/:projectId/branch/:branchName
+    SettingsPage.tsx      # /dashboard/settings
+  components/
+    layout/
+      AppShell.tsx         # Root layout: sidebar + topbar + outlet
+      Sidebar.tsx          # Left nav: logo, projects, branches
+      TopBar.tsx           # Breadcrumb, user avatar
+    episodes/
+      EpisodeTimeline.tsx  # List of EpisodeCards
+      EpisodeCard.tsx      # Collapsible episode card
+      CallItem.tsx         # Single AI call row inside episode
+      DiffViewer.tsx       # Diff rendering component
+    ai/
+      ExplainDiffCard.tsx   # Summary + risks + checks card
+      BranchSummaryCard.tsx # PR summary + key changes card
+    ui/
+      Badge.tsx             # Pill badges
+      SkeletonCard.tsx      # Loading placeholder
+      EmptyState.tsx        # Empty state with icon + CTA
+      CopyButton.tsx        # Copy to clipboard button
+      ErrorMessage.tsx      # Inline error display
+      Spinner.tsx           # Small spinner
+  types/
+    index.ts               # All TypeScript interfaces
+
+=============================================================
+SECTION 4: TYPESCRIPT TYPES (src/types/index.ts)
+=============================================================
+
+export interface Project {
+  id: string
+  name: string
+  repoUrl: string
+  localWorkspaceName: string
+  defaultBranch: string
+  createdAt: Date
+  updatedAt: Date
+  settings: {
+    preferredModel: string
+    redactionEnabled: boolean
+    autoSummariesEnabled: boolean
+  }
+}
+
+export interface Episode {
+  id: string
+  projectId: string
+  label: string
+  branchName: string
+  status: "active" | "closed"
+  startedAt: Date
+  endedAt: Date | null
+  callCount: number
+  changedFiles: string[]
+  latestDiffHash: string
+  manualNotes: string
+  episodeSummary: string | null
+  explainDiffSummary: string | null
+  explainDiffRisks: string[]
+  explainDiffChecks: string[]
+}
+
+export interface Call {
+  id: string
+  episodeId: string
+  createdAt: Date
+  source: "extension_chat" | "manual_log"
+  intentTag: string
+  promptText: string
+  modelName: string
+  modelResponse: string
+  branchName: string
+  activeFilePath: string
+  relatedFiles: string[]
+  diffSnapshot: string
+  diffHash: string
+  todoMatches: string[]
+  latencyMs: number
+  tokenUsage: { input: number; output: number }
+  status: "success" | "failed" | "redacted"
+}
+
+export interface ExplainDiffResult {
+  summary: string
+  risks: string[]
+  checks: string[]
+}
+
+export interface BranchSummaryResult {
+  pr_summary: string
+  key_changes: string[]
+  review_risks: string[]
+}
+
+=============================================================
+SECTION 5: AUTH CONTEXT (src/context/AuthContext.tsx)
+=============================================================
+
+Setup:
+  - Create AuthContext with: { user, loading, signIn, signOut }
+  - Use onAuthStateChanged to keep user in sync
+  - signIn: signInWithPopup(auth, new GoogleAuthProvider())
+  - signOut: signOut(auth)
+  - Wrap entire App in <AuthProvider>
+
+Usage in any component:
+  const { user, signIn, signOut } = useAuth()
+
+=============================================================
+SECTION 6: FIRESTORE DATA — READ CONTRACTS
+=============================================================
+
+The backend has already written all data to Firestore.
+You ONLY READ from Firestore. Never write directly from the dashboard.
+All writes go through the deployed backend endpoints.
+
+Collection paths:
+
+  users/{uid}
+    displayName: string
+    email: string
+    photoURL: string
+    createdAt: Timestamp
+
+  users/{uid}/projects/{projectId}
+    name: string
+    repoUrl: string
+    localWorkspaceName: string
+    defaultBranch: string
+    createdAt: Timestamp
+    updatedAt: Timestamp
+    settings: {
+      preferredModel: string
+      redactionEnabled: boolean
+      autoSummariesEnabled: boolean
+    }
+
+  users/{uid}/projects/{projectId}/episodes/{episodeId}
+    label: string
+    branchName: string
+    status: "active" | "closed"
+    startedAt: Timestamp
+    endedAt: Timestamp | null
+    callCount: number
+    changedFiles: string[]
+    latestDiffHash: string
+    manualNotes: string
+    episodeSummary: string | null
+    explainDiffSummary: string | null
+    explainDiffRisks: string[]
+    explainDiffChecks: string[]
+
+  users/{uid}/projects/{projectId}/episodes/{episodeId}/calls/{callId}
+    createdAt: Timestamp
+    source: "extension_chat" | "manual_log"
+    intentTag: string
+    promptText: string
+    modelName: string
+    modelResponse: string
+    branchName: string
+    activeFilePath: string
+    relatedFiles: string[]
+    diffSnapshot: string
+    diffHash: string
+    todoMatches: string[]
+    latencyMs: number
+    tokenUsage: { input: number, output: number }
+    status: "success" | "failed" | "redacted"
+
+=============================================================
+SECTION 7: FIRESTORE HOOKS (src/lib/firestoreHooks.ts)
+=============================================================
+
+Build these custom hooks. Each returns { data, loading, error }.
+
+--- useProjects(uid: string) ---
+  collection: users/{uid}/projects
+  query: orderBy("updatedAt", "desc")
+  mode: onSnapshot (real-time)
+  returns: Project[]
+
+--- useEpisodes(uid: string, projectId: string) ---
+  collection: users/{uid}/projects/{projectId}/episodes
+  query: orderBy("startedAt", "desc")
+  mode: onSnapshot (real-time)
+  returns: Episode[]
+  Note: use this on ProjectPage so new episodes from VS Code appear instantly
+
+--- useEpisodesByBranch(uid, projectId, branchName) ---
+  collection: users/{uid}/projects/{projectId}/episodes
+  query: where("branchName", "==", branchName), orderBy("startedAt", "asc")
+  mode: onSnapshot
+  returns: Episode[]
+
+--- useEpisode(uid, projectId, episodeId) ---
+  document: users/{uid}/projects/{projectId}/episodes/{episodeId}
+  mode: onSnapshot (live — so callCount updates live when extension logs)
+  returns: Episode | null
+
+--- useCalls(uid, projectId, episodeId, enabled: boolean) ---
+  collection: users/{uid}/projects/{projectId}/episodes/{episodeId}/calls
+  query: orderBy("createdAt", "asc")
+  mode: getDocs (one-time fetch, not live)
+  enabled: only fetch when episode card is expanded (lazy load)
+  returns: Call[]
+
+Helper to convert Firestore Timestamp to Date:
+  const toDate = (ts: any): Date => ts?.toDate?.() ?? new Date(ts)
+
+=============================================================
+SECTION 8: BACKEND API CONTRACTS (src/lib/api.ts)
+=============================================================
+
+Base URL: import.meta.env.VITE_API_BASE_URL
+All requests need: Authorization: Bearer {idToken}
+
+Helper — get token:
+  async function getToken(): Promise<string> {
+    const user = auth.currentUser
+    if (!user) throw new Error("Not authenticated")
+    return user.getIdToken()
+  }
+
+Helper — authenticated POST:
+  async function post<T>(path: string, body: object): Promise<T> {
+    const token = await getToken()
+    const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    })
+    if (res.status === 401) throw new Error("UNAUTHORIZED")
+    if (!res.ok) throw new Error(`API_ERROR_${res.status}`)
+    return res.json()
+  }
+
+--- explainDiff(projectId, episodeId) ---
+  POST /episodes/explain
+  Body: { projectId, episodeId }
+  Returns: ExplainDiffResult { summary, risks[], checks[] }
+
+  Smart cache check BEFORE calling:
+    If episode.explainDiffSummary is already set in Firestore,
+    display it directly — do not call the API again.
+    The backend writes the result back to Firestore after first call,
+    so Firestore is the cache layer.
+
+--- branchSummary(projectId, branch) ---
+  POST /branches/summarize
+  Body: { projectId, branch }
+  Returns: BranchSummaryResult { pr_summary, key_changes[], review_risks[] }
+
+--- search(query, filters) ---
+  POST /search
+  Body: {
+    query: string,
+    filters: {
+      branchName?: string,
+      filePath?: string,
+      dateFrom?: string,   // ISO date string
+      dateTo?: string      // ISO date string
+    }
+  }
+  Returns: {
+    episodes: Array<{
+      episodeId, projectId, label, branchName, callCount, startedAt
+    }>,
+    calls: Array<{
+      callId, episodeId, intentTag, activeFilePath, createdAt
+    }>
+  }
+
+Error handling rules:
+  - UNAUTHORIZED: sign user out → navigate("/login")
+  - API_ERROR_500: show inline error with retry button
+  - Network failure: "Connection error. Check your network."
+  - Never crash the UI on an API failure — show error state in component
+
+=============================================================
+SECTION 9: ROUTING (src/routes/index.tsx)
+=============================================================
+
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom"
+
+ProtectedRoute component:
+  - Read { user, loading } from AuthContext
+  - If loading: show full-screen Spinner
+  - If no user: <Navigate to="/login" replace />
+  - If user: <Outlet />
+
+Route tree:
+  <BrowserRouter>
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route element={<ProtectedRoute />}>
+        <Route path="/dashboard" element={<AppShell />}>
+          <Route index element={<HomePage />} />
+          <Route path=":projectId" element={<ProjectPage />} />
+          <Route path=":projectId/episodes/:episodeId" element={<EpisodeDetailPage />} />
+          <Route path=":projectId/branch/:branchName" element={<BranchPage />} />
+          <Route path="settings" element={<SettingsPage />} />
+        </Route>
+      </Route>
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+    </Routes>
+  </BrowserRouter>
+
+=============================================================
+SECTION 10: LAYOUT — AppShell, Sidebar, TopBar
+=============================================================
+
+--- AppShell ---
+
+Structure:
+  <div className="flex h-screen bg-[#0d1117] text-[#e6edf3] overflow-hidden">
+    <Sidebar />
+    <div className="flex flex-col flex-1 overflow-hidden">
+      <TopBar />
+      <main className="flex-1 overflow-y-auto px-6 py-6">
+        <Outlet />
+      </main>
+    </div>
+  </div>
+
+--- Sidebar ---
+
+Width: 240px, fixed, dark bg (#0d1117), right border (#30363d)
+
+Top section:
+  - ContextLens logo (SVG eye/lens icon + wordmark "ContextLens")
+  - Subtle version badge or tagline under logo
+
+Middle section: "PROJECTS" label (uppercase, muted, small)
+  - List of projects from useProjects(uid)
+  - Each item: project name, small "N episodes" count
+  - Active project: teal left border highlight
+  - On click: navigate to /dashboard/:projectId
+
+Under active project — "BRANCHES" sub-list:
+  - List of unique branchNames from episodes in that project
+  - Each item: branch icon + branch name + episode count
+  - Active branch: teal text
+  - On click: navigate to /dashboard/:projectId/branch/:branchName
+
+Bottom section:
+  - User avatar (Google photo) + email (truncated)
+  - Settings icon link → /dashboard/settings
+  - Sign out button
+
+--- TopBar ---
+
+Height: 48px, border-bottom (#30363d)
+Left: breadcrumb — Home > ProjectName > EpisodeLabel (links)
+Right: search icon button (opens search modal), user avatar
+
+=============================================================
+SECTION 11: PAGE SPECS
+=============================================================
+
+--- LoginPage (/login) ---
+
+Full screen, centered, dark background
+Elements:
+  - ContextLens logo (large)
+  - Tagline: "AI workflow memory for developers"
+  - "Sign in with Google" button
+    - On click: signIn()
+    - On success: navigate("/dashboard")
+    - On error: show inline error below button
+  - Subtle footer: "Your data is private. Only you can see your episodes."
+
+Behavior:
+  - If user is already signed in: redirect to /dashboard immediately
+
+--- HomePage (/dashboard) ---
+
+Main heading: "Welcome back, {user.displayName}"
+
+Section 1: "Your Projects"
+  Layout: grid, 2-3 cards per row
+  Each ProjectCard shows:
+    - Project name (bold)
+    - Repo URL (muted, truncated)
+    - Last episode date: "Last active 2 hours ago"
+    - Total call count: "24 AI calls"
+    - Default branch badge
+    - Link to /dashboard/:projectId
+  Loading: 3 SkeletonCards
+  Empty: EmptyState "No projects yet — install the VS Code extension to start"
+
+Section 2: "Recent Episodes"
+  Compact list of last 5 episodes across all projects
+  Each row shows:
+    - Episode label
+    - Project name (muted)
+    - Branch badge
+    - Status badge (active/closed)
+    - Time ago
+    - Link to episode detail page
+  Data source: getDocs across all project episode collections, limit 5, order by startedAt desc
+
+--- ProjectPage (/dashboard/:projectId) ---
+
+Header:
+  - Project name (H1)
+  - Repo URL (muted link)
+  - Total episodes count, total calls count (muted stats)
+
+Filter bar (sticky, below header):
+  - Search input: debounced 300ms → POST /search
+  - Branch filter: dropdown of unique branches
+  - Status filter: All / Active / Closed
+  - Date range: from/to date pickers (optional, stretch)
+  - "Clear all filters" link (appears when any filter is active)
+
+Timeline area:
+  - <EpisodeTimeline episodes={filteredEpisodes} />
+  - Real-time: useEpisodes with onSnapshot
+  - Loading: SkeletonCards (3)
+  - Empty (no filter): EmptyState "No episodes yet on this project"
+  - Empty (with filter): "No episodes match your filters"
+
+--- EpisodeDetailPage (/dashboard/:projectId/episodes/:episodeId) ---
+
+Uses useEpisode (live onSnapshot — callCount updates in real time)
+
+Header section:
+  - Episode label (H1, bold)
+  - Row of badges: branch, status (active/closed), "N AI calls"
+  - Time range: "Started May 9, 2026 · Closed 3 hours later" (or "Active since X")
+  - manualNotes if set (italic, muted)
+
+Explain Diff section (always show this section):
+  - "Explain Diff" button with sparkle icon
+  - Logic:
+    if episode.explainDiffSummary is set:
+      show ExplainDiffCard immediately (no API call)
+    else:
+      show "Explain Diff" button
+      on click: call explainDiff(projectId, episodeId)
+      show Spinner inside card while loading
+      on success: render ExplainDiffCard
+      on error: show error + retry button
+  - ExplainDiffCard (see component spec below)
+
+AI Calls section:
+  - Section label: "AI Calls ({callCount})"
+  - List of <CallItem> components
+  - Calls loaded via useCalls (lazy: fetch only when page loads)
+  - Loading: SkeletonCards while fetching
+  - Each CallItem is collapsible
+
+--- BranchPage (/dashboard/:projectId/branch/:branchName) ---
+
+Header:
+  - Git branch icon + branch name (H1)
+  - Episode count for this branch
+  - "Summarize Branch" button (primary action, teal)
+    - On click: call branchSummary(projectId, branchName)
+    - Show Spinner inside card while loading
+    - On success: render BranchSummaryCard
+    - On error: show error + retry
+
+BranchSummaryCard (shown below button after click):
+  - PR Summary paragraph
+  - Key Changes list (bullet points with tick icons)
+  - Review Risks list (bullet points with warning icons)
+  - "Copy as PR Description" button
+    Copies this markdown:
+      ## Summary
+      {pr_summary}
+
+      ### Key Changes
+      {key_changes.map(c => `- ${c}`).join('
+')}
+
+      ### Review Risks
+      {review_risks.map(r => `- ⚠ ${r}`).join('
+')}
+
+Episodes on this branch (below summary):
+  - Ordered list of EpisodeCards (oldest first, so story reads top to bottom)
+  - Uses useEpisodesByBranch
+  - Same collapsible behavior as project timeline
+
+--- SettingsPage (/dashboard/settings) ---
+
+Two sections:
+
+1. Profile
+  - Avatar + display name (read-only)
+  - Email (read-only)
+  - Sign Out button (red, outlined)
+
+2. Project Settings
+  - Dropdown: select project
+  - Fields shown for selected project:
+    - Project name (read-only)
+    - Repo URL (read-only — set by extension)
+    - Preferred model (text input)
+    - Redaction enabled (toggle)
+    - Auto summaries enabled (toggle)
+  - Note under fields: "Project settings are managed primarily by the VS Code extension."
+
+=============================================================
+SECTION 12: COMPONENT SPECS
+=============================================================
+
+--- EpisodeTimeline ---
+Props: episodes: Episode[], projectId: string, uid: string
+Renders: vertical list of EpisodeCard components
+Passes down projectId, uid to each card
+
+--- EpisodeCard ---
+Props: episode: Episode, projectId: string, uid: string
+State: isExpanded: boolean, calls: Call[], callsLoading: boolean
+
+Collapsed view (always visible):
+  - Episode label (bold, 16px)
+  - Row: branch badge, status badge, "N calls" text, time ago
+  - Changed files count: "3 files changed" (muted)
+  - Expand chevron (rotates 180° when expanded)
+
+Expanded view (on click):
+  - Trigger useCalls fetch on first expand (lazy)
+  - Show SkeletonCards while loading calls
+  - Render list of CallItem components
+  - If episode.explainDiffSummary is set: show ExplainDiffCard inline
+  - "Open Full Detail" link → navigate to EpisodeDetailPage
+
+Transition:
+  - Use CSS transition on max-height or animate with Tailwind
+  - Smooth expand/collapse, 200ms ease
+
+--- CallItem ---
+Props: call: Call
+State: isExpanded: boolean
+
+Collapsed (always visible):
+  - Intent tag text (bold, or "No intent" muted)
+  - activeFilePath badge (gray pill)
+  - Time ago (muted, small)
+  - Status dot: green (success), red (failed), gray (redacted)
+  - Expand chevron
+
+Expanded:
+  - Intent tag as bold heading
+  - File badges row: activeFilePath (gray) + relatedFiles (lighter gray)
+  - todoMatches: shown as small orange chips if any
+  - Prompt section:
+      Label: "Prompt" (muted uppercase)
+      Collapsible text: max 3 lines collapsed, "Show more" link
+  - Response section:
+      Label: "Response" (muted uppercase)
+      Collapsible text: max 3 lines collapsed, "Show more" link
+  - Diff section:
+      Hidden if diffSnapshot is empty
+      Label: "Diff" (muted uppercase)
+      <DiffViewer diff={call.diffSnapshot} />
+  - Metadata footer (muted, small):
+      latency: "{latencyMs}ms"
+      tokens: "{tokenUsage.input} in · {tokenUsage.output} out"
+      model: "{modelName}"
+
+--- DiffViewer ---
+Props: diff: string
+Library: react-diff-viewer-continued
+
+Implementation:
+  - Parse unified diff string to split into oldValue / newValue
+    (split on @@ hunk headers, reconstruct old and new sides)
+  - Render with:
+    <ReactDiffViewer
+      oldValue={oldValue}
+      newValue={newValue}
+      splitView={false}
+      useDarkTheme={true}
+      hideLineNumbers={false}
+    />
+  - Wrap in a bordered card with "Diff" header label
+  - Collapsed by default if diff > 30 lines — show "Show diff ({n} lines)" toggle
+  - If diffSnapshot is empty string or null: render nothing (skip entirely)
+
+--- ExplainDiffCard ---
+Props: result: ExplainDiffResult | null, loading: boolean, error: string | null
+Style: left teal border (#4f98a3), dark card bg (#161b22)
+
+Loading state:
+  - Spinner + "Asking Gemini..." text inside card
+
+Error state:
+  - Error icon + message + "Retry" button
+
+Result state:
+  - Small label: "✦ Gemini Analysis" (teal, small, uppercase)
+  - Summary: paragraph text (16px, normal weight)
+  - Divider
+  - "Potential Risks" section:
+      Label with ⚠ icon (amber)
+      Bulleted list of risk strings
+  - "Suggested Checks" section:
+      Label with ✓ icon (green)
+      Bulleted list of check strings
+
+--- BranchSummaryCard ---
+Props: result: BranchSummaryResult | null, loading: boolean, error: string | null
+Style: same teal-border card
+
+Loading: Spinner + "Generating PR summary..."
+Error: error message + Retry
+
+Result:
+  - "✦ Branch Summary" label (teal, small)
+  - PR Summary paragraph
+  - "Key Changes" list with tick icons
+  - "Review Risks" list with warning icons
+  - CopyButton for full markdown export (bottom right of card)
+
+--- Badge ---
+Props: text: string, variant: string
+
+Variants and styles:
+  branch:         bg-teal-900/40   text-teal-300   border border-teal-700/50
+  file:           bg-gray-700/50   text-gray-300   border border-gray-600/50
+  intent:         bg-purple-900/40 text-purple-300  border border-purple-700/50
+  status-active:  bg-green-900/40  text-green-300   border border-green-700/50
+  status-closed:  bg-gray-700/40   text-gray-400    border border-gray-600/50
+  redacted:       bg-red-900/40    text-red-300     border border-red-700/50
+
+All badges: rounded-full, px-2 py-0.5, text-xs, font-medium
+
+--- SkeletonCard ---
+Animated pulse placeholder (Tailwind animate-pulse)
+Rough dimensions: h-24, rounded-lg, bg-gray-800/50
+Show 3 of these while fetching lists
+
+--- EmptyState ---
+Props: title, description, ctaLabel?, ctaHref?
+Layout: centered vertically in available space
+Style: muted icon (48px), bold title, description text, optional CTA button
+
+--- CopyButton ---
+Props: text: string, label?: string
+Behavior:
+  await navigator.clipboard.writeText(text)
+  Show checkmark icon + "Copied!" for 2 seconds then reset
+  Style: small ghost button, copy icon from lucide-react
+
+--- ErrorMessage ---
+Props: message: string, onRetry?: () => void
+Style: red-tinted card, error icon, message text, optional Retry button
+
+--- Spinner ---
+Props: size?: "sm" | "md"
+Style: animated spinning circle, teal color
+
+=============================================================
+SECTION 13: DESIGN TOKENS
+=============================================================
+
+Add to tailwind.config.js extend.colors:
+
+  surface:      "#0d1117"    // page background
+  card:         "#161b22"    // card/panel background
+  cardBorder:   "#30363d"    // card borders
+  primary:      "#4f98a3"    // teal accent
+  primaryLight: "#7ec8c8"    // lighter teal for hover
+  textPrimary:  "#e6edf3"    // main readable text
+  textMuted:    "#8b949e"    // secondary/muted text
+  diffAdd:      "#1a4023"    // diff addition background
+  diffRemove:   "#4a1a1a"    // diff removal background
+
+Fonts (add to tailwind.config.js extend.fontFamily):
+  sans: ["Geist Sans", "ui-sans-serif", "system-ui"]
+  mono: ["Geist Mono", "ui-monospace", "monospace"]
+
+In src/main.tsx:
+  import "geist/dist/geist-sans.css"
+  import "geist/dist/geist-mono.css"
+
+=============================================================
+SECTION 14: LOADING AND ERROR STATE RULES
+=============================================================
+
+Every data-fetching component MUST handle all three states:
+
+Pattern:
+  if (loading) return <SkeletonCard />
+  if (error) return <ErrorMessage message={error} onRetry={refetch} />
+  if (data.length === 0) return <EmptyState ... />
+  return <DataComponent data={data} />
+
+Never:
+  - Show an empty list while loading
+  - Crash or show blank screen on API errors
+  - Show raw error objects to the user
+
+=============================================================
+SECTION 15: REQUIRED INTERACTIONS CHECKLIST
+=============================================================
+
+  [ ] Episode cards expand and collapse with smooth transition
+  [ ] Prompt/response text collapses to 3 lines with "Show more" toggle
+  [ ] Diff section hides/shows per call
+  [ ] Branch filter on project page updates episode list immediately
+  [ ] Search bar debounces 300ms then calls /search endpoint
+  [ ] Explain Diff button: checks Firestore cache first, then calls API
+  [ ] Branch Summary button: calls API, renders card
+  [ ] Copy PR Description: writes formatted markdown to clipboard + shows "Copied!"
+  [ ] Navigating to episode detail page from any episode card
+  [ ] Real-time updates: new episodes from VS Code appear on project page without refresh
+
+=============================================================
+SECTION 16: DESIGN DIRECTION REFERENCE
+=============================================================
+
+- Dark mode only. No light mode toggle needed for hackathon.
+- Reference: Linear app (dense info, left sidebar, right content)
+           Vercel dashboard (clean cards, good hierarchy, fast)
+- Typography hierarchy:
+    Page title:    24px, font-bold, textPrimary
+    Section label: 11px, font-semibold, textMuted, uppercase, tracking-wider
+    Card title:    16px, font-semibold, textPrimary
+    Body text:     14px, font-normal, textPrimary
+    Muted text:    13px, font-normal, textMuted
+    Code/paths:    13px, font-mono, textMuted
+- Spacing: generous padding inside cards (p-4), tight gap between items (gap-2)
+- Cards: bg-card, border border-cardBorder, rounded-lg
+- Hover states: bg shifts to slightly lighter on hover (bg-gray-800/30)
+- Active nav items: teal left border (border-l-2 border-primary)
+- Buttons:
+    Primary: bg-primary text-white rounded-md px-4 py-2 hover:bg-primaryLight
+    Ghost: border border-cardBorder text-textMuted hover:text-textPrimary
+    Danger: border border-red-700 text-red-400
+
+=============================================================
+SECTION 17: DEMO SEED DATA
+=============================================================
+
+Before the demo, seed your Firestore with this exact structure
+under the demo account (can be done via Firebase Console or a seed script).
+
+Project: "ContextLens Dev"
+  projectId: any generated id
+  repoUrl: "https://github.com/yourteam/contextlens"
+  defaultBranch: "main"
+  updatedAt: recent timestamp
+
+Branch: "feature/auth-v2"
+
+  Episode 1: "Refactor Auth Middleware"
+    status: "closed"
+    callCount: 4
+    startedAt: 2026-05-09T18:00:00Z
+    endedAt: 2026-05-09T20:30:00Z
+    changedFiles: ["src/middleware/auth.ts", "src/utils/tokenHelper.ts"]
+    explainDiffSummary: "Extracted token validation logic into a reusable tokenHelper module. The refactored auth middleware now delegates token verification to helper functions, reducing duplication across route handlers."
+    explainDiffRisks: ["Possible regression in expired token handling if tokenHelper is not called in all middleware paths", "Token refresh logic is not yet migrated"]
+    explainDiffChecks: ["Add unit tests for tokenHelper.validateToken", "Verify all protected routes use the new middleware", "Check Edge case: missing Authorization header"]
+    Calls (4 mock calls with realistic prompts + responses + diffs):
+      Call 1: intentTag "Clean up token validation", file "src/middleware/auth.ts", realistic diff showing extraction
+      Call 2: intentTag "Move token helpers to utils", file "src/utils/tokenHelper.ts"
+      Call 3: intentTag "Update imports across routes", file "src/routes/user.ts"
+      Call 4: intentTag "Add JSDoc comments", file "src/utils/tokenHelper.ts"
+
+  Episode 2: "Add Rate Limiting"
+    status: "active"
+    callCount: 2
+    startedAt: 2026-05-10T10:00:00Z
+    endedAt: null
+    changedFiles: ["src/middleware/rateLimit.ts"]
+    explainDiffSummary: null  (not yet generated — demo "Explain Diff" live)
+    Calls (2):
+      Call 1: intentTag "Add express-rate-limit to middleware", file "src/middleware/rateLimit.ts"
+      Call 2: intentTag "Configure rate limits per route", file "src/app.ts"
+
+Branch: "main"
+
+  Episode 3: "Setup Firebase Functions"
+    status: "closed"
+    callCount: 3
+    changedFiles: ["functions/src/index.ts", "functions/package.json"]
+    explainDiffSummary: "Initialized Firebase Cloud Functions project and wired up the first logCall endpoint. Authentication middleware added to all functions using Firebase Admin SDK."
+    explainDiffRisks: ["Cold start latency not yet optimized"]
+    explainDiffChecks: ["Add error logging", "Test with real extension calls"]
+
+Pre-generate all summaries and store directly in Firestore.
+This makes your demo independent of live Gemini API calls.
+For "Add Rate Limiting" episode — leave explainDiffSummary null
+so you can demo the live Explain Diff call on stage.
+
+=============================================================
+SECTION 18: DEMO PRIORITIES
+=============================================================
+
+Build these demo paths FIRST before anything else:
+  1. /dashboard/:projectId — episode timeline (most time here in demo)
+  2. /dashboard/:projectId/episodes/:episodeId — detail + Explain Diff
+  3. /dashboard/:projectId/branch/:branchName — Branch Summary + copy
+
+Build these second:
+  4. /login
+  5. /dashboard home
+  6. /dashboard/settings
+
+Polish order:
+  1. EpisodeCard expand/collapse (this is seen most)
+  2. ExplainDiffCard visual treatment (this is the "wow" moment)
+  3. BranchSummaryCard + copy (this is the closing demo beat)
+  4. Badge pills everywhere
+  5. Skeleton loaders
+  6. Empty states
+
+Optimize layout for 1280px × 800px (13" laptop, side by side with VS Code).
+Do not build for mobile — it is not needed for demo.
+
+=============================================================
+SECTION 19: ACCEPTANCE CRITERIA
+=============================================================
+
+Auth:
+  [ ] User signs in with Google and lands on /dashboard
+  [ ] Signed-out user is redirected to /login from any route
+  [ ] Only the authenticated user's data is shown (Firestore rules enforce this, but UI should only read own uid path)
+
+HomePage:
+  [ ] All projects shown as cards
+  [ ] Recent episodes list shows last 5 across projects
+  [ ] Skeleton loaders during fetch
+  [ ] Empty state if no projects
+
+ProjectPage:
+  [ ] Episode timeline renders all episodes for selected project
+  [ ] New episodes from VS Code appear in real-time without page refresh
+  [ ] Branch filter correctly filters timeline
+  [ ] Search returns results from /search endpoint
+  [ ] Episode cards expand and collapse correctly
+  [ ] Clicking "Open Full Detail" navigates to EpisodeDetailPage
+
+EpisodeDetailPage:
+  [ ] All calls render under the episode
+  [ ] Diff viewer shows for calls with diff data
+  [ ] Explain Diff reads from Firestore if already set (no extra API call)
+  [ ] Explain Diff calls API and renders result if not yet set
+  [ ] ExplainDiffCard shows summary, risks, and checks
+  [ ] Loading and error states handled correctly
+
+BranchPage:
+  [ ] Summarize Branch calls API and renders BranchSummaryCard
+  [ ] Copy as Markdown copies valid formatted PR description
+  [ ] Episodes for branch shown in chronological order below summary
+
+SettingsPage:
+  [ ] Profile section shows user info and sign out button
+  [ ] Project settings section shows per-project toggles
+
+Design:
+  [ ] Dark mode only, consistent teal accent
+  [ ] Badge pills on all branch/file/intent/status indicators
+  [ ] Skeleton loaders on all loading states
+  [ ] Empty states with CTA on all zero-data views
+  [ ] Diff viewer renders syntax-highlighted without raw text dump
+  [ ] All primary actions reachable in 2 clicks from any page
+  [ ] Looks premium at 1280px (demo screen width)
+
+=============================================================
+SECTION 20: DELIVERABLES
+=============================================================
+
+  1. Working Vite + React dashboard
+  2. All 5 pages fully wired to Firestore and backend endpoints
+  3. Firebase Hosting deployment with working hosted URL
+  4. .env.example file with all VITE_ variables listed (no values)
+  5. README with:
+       npm install
+       cp .env.example .env   # fill in values
+       npm run dev            # local dev
+       npm run build && firebase deploy  # production
+
+=============================================================
+SECTION 21: DO NOT BUILD
+=============================================================
+
+  - Any Firebase Functions or backend service code
+  - Gemini prompt templates
+  - Firestore security rules
+  - VS Code extension code
+  - Server-side rendering
+  - Mobile-responsive layouts (not needed for demo)
+  - Multi-user team dashboards
+  - GitHub PR integration
+  - Billing or subscription UI
+  - Admin panels
+
+=============================================================
+END OF SPEC
+=============================================================
