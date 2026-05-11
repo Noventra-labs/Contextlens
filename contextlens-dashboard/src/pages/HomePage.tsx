@@ -16,8 +16,8 @@ interface RecentEpisode extends Episode {
 }
 
 export function HomePage() {
-  const { user, migrating } = useAuth()
-  const { data: projects, loading: projectsLoading, error: projectsError } = useProjects(user?.uid || 'contextlens-demo-user')
+  const { user } = useAuth()
+  const { data: projects, loading: projectsLoading, error: projectsError } = useProjects(user?.uid ?? '')
   const [recentEpisodes, setRecentEpisodes] = useState<RecentEpisode[]>([])
   const [episodesLoading, setEpisodesLoading] = useState(true)
   const [episodesError, setEpisodesError] = useState<string | null>(null)
@@ -34,7 +34,7 @@ export function HomePage() {
     const fetchAll = async () => {
       setEpisodesError(null)
       try {
-        const effectiveUid = user?.uid || 'contextlens-demo-user'
+        const effectiveUid = user?.uid ?? ''
 
         // Fetch episodes from all projects in parallel
         const results = await Promise.allSettled(
@@ -118,13 +118,10 @@ export function HomePage() {
 
         {!projectsLoading && projects.length === 0 && (
           <EmptyState
-            title={migrating ? "Setting up your workspace..." : "No projects yet"}
-            description={migrating 
-              ? "We're copying demo data to your account so you can explore the features." 
-              : "Install the VS Code extension to start capturing AI coding sessions."
-            }
-            ctaLabel={migrating ? undefined : "View docs"}
-            ctaHref={migrating ? undefined : "https://github.com"}
+            title="No projects yet"
+            description="Install the VS Code extension to start capturing AI coding sessions."
+            ctaLabel="View docs"
+            ctaHref="https://github.com"
           />
         )}
 

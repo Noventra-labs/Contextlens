@@ -21,7 +21,7 @@ export function BranchPage() {
     data: episodes,
     loading: epLoading,
     error: epError,
-  } = useEpisodesByBranch(user?.uid || 'contextlens-demo-user', projectId ?? '', decodedBranch)
+  } = useEpisodesByBranch(user?.uid ?? '', projectId ?? '', decodedBranch)
 
   const [summaryResult, setSummaryResult] = useState<BranchSummaryResult | null>(null)
   const [summaryLoading, setSummaryLoading] = useState(false)
@@ -119,7 +119,7 @@ export function BranchPage() {
           <EpisodeTimeline
             episodes={episodes}
             projectId={projectId ?? ''}
-            uid={user?.uid || 'contextlens-demo-user'}
+            uid={user?.uid ?? ''}
           />
         )}
       </section>

@@ -5,6 +5,9 @@ import { getAuthManager } from './auth';
 const API_BASE = 'https://contextlens-backend-001.web.app/api';
 const DASHBOARD_BASE = 'https://contextlens-backend-001.web.app';
 
+// Firebase Web API key — needed to exchange custom tokens for ID tokens
+const FIREBASE_API_KEY = 'AIzaSyAQ2U7k1Z1h0myROPoj9upUMxJ-r_ZZ3ME';
+
 function httpRequest(url: string, options: {
   method: string;
   headers: Record<string, string>;
@@ -41,13 +44,64 @@ function httpRequest(url: string, options: {
 }
 
 /**
+ * Exchange a Firebase custom token for a real Firebase ID token
+ * using the Firebase Auth REST API.
+ *
+ * Custom tokens received from the backend's /auth/login route cannot be
+ * verified by admin.auth().verifyIdToken(). They must first be exchanged
+ * for ID tokens via the identitytoolkit REST endpoint.
+ */
+async function exchangeCustomTokenForIdToken(customToken: string): Promise<{
+  idToken: string;
+  refreshToken: string;
+  localId: string;
+}> {
+  const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${FIREBASE_API_KEY}`;
+  const res = await httpRequest(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      token: customToken,
+      returnSecureToken: true,
+    }),
+  });
+
+  if (res.status !== 200) {
+    throw new Error(`Token exchange failed (${res.status}): ${res.body}`);
+  }
+
+  return JSON.parse(res.body);
+}
+
+/**
+ * Refresh an expired ID token using a refresh token.
+ */
+async function refreshIdToken(refreshToken: string): Promise<{
+  id_token: string;
+  refresh_token: string;
+}> {
+  const url = `https://securetoken.googleapis.com/v1/token?key=${FIREBASE_API_KEY}`;
+  const res = await httpRequest(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(refreshToken)}`,
+  });
+
+  if (res.status !== 200) {
+    throw new Error(`Token refresh failed (${res.status}): ${res.body}`);
+  }
+
+  return JSON.parse(res.body);
+}
+
+/**
  * Authenticated POST request to the backend.
  * Pulls the Bearer token from AuthManager's SecretStorage.
- * On 401, clears the session and prompts re-sign-in.
+ * On 401, attempts a token refresh before giving up.
  */
 async function request<T>(path: string, body?: object): Promise<T> {
   const authManager = getAuthManager();
-  const token = await authManager.getToken();
+  let token = await authManager.getIdToken();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -62,16 +116,32 @@ async function request<T>(path: string, body?: object): Promise<T> {
     headers['Content-Length'] = Buffer.byteLength(jsonBody).toString();
   }
 
-  const res = await httpRequest(`${API_BASE}${path}`, {
+  let res = await httpRequest(`${API_BASE}${path}`, {
     method: 'POST',
     headers,
     body: jsonBody,
   });
 
-  // Handle expired / invalid token
+  // On 401, try refreshing the token once
   if (res.status === 401) {
-    await authManager.handleSessionExpired();
-    throw new Error('Session expired');
+    const refreshed = await authManager.tryRefreshToken();
+    if (refreshed) {
+      token = await authManager.getIdToken();
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        res = await httpRequest(`${API_BASE}${path}`, {
+          method: 'POST',
+          headers,
+          body: jsonBody,
+        });
+      }
+    }
+
+    // Still 401 after refresh → session expired
+    if (res.status === 401) {
+      await authManager.handleSessionExpired();
+      throw new Error('Session expired');
+    }
   }
 
   let parsed: any;
@@ -187,3 +257,5 @@ export class ApiClient {
     return `${DASHBOARD_BASE}/dashboard/${projectId}/branch/${encodeURIComponent(branchName)}`;
   }
 }
+
+export { exchangeCustomTokenForIdToken, refreshIdToken };

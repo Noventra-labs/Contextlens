@@ -18,12 +18,12 @@ export function EpisodeDetailPage() {
   const { user } = useAuth()
 
   const { data: episode, loading: epLoading, error: epError } = useEpisode(
-    user?.uid || 'contextlens-demo-user',
+    user?.uid ?? '',
     projectId ?? '',
     episodeId ?? '',
   )
   const { data: calls, loading: callsLoading } = useCalls(
-    user?.uid || 'contextlens-demo-user',
+    user?.uid ?? '',
     projectId ?? '',
     episodeId ?? '',
     !!episodeId,

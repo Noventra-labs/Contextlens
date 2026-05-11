@@ -1,15 +1,27 @@
 import * as vscode from 'vscode';
+import { exchangeCustomTokenForIdToken, refreshIdToken } from './apiClient';
 
 // Must match: "<publisher>.<name>" from package.json
 const EXTENSION_ID = 'noventra-Labs.contextlens';
 
 const API_BASE = 'https://contextlens-backend-001.web.app/api';
-const SECRET_TOKEN_KEY = 'contextlens.auth.token';
+const SECRET_ID_TOKEN_KEY = 'contextlens.auth.idToken';
+const SECRET_REFRESH_TOKEN_KEY = 'contextlens.auth.refreshToken';
 const SECRET_UID_KEY = 'contextlens.auth.uid';
+
+// Legacy key — we'll migrate away from it
+const SECRET_TOKEN_KEY = 'contextlens.auth.token';
 
 /**
  * AuthManager handles the full VS Code → Browser → Backend → VS Code
  * sign-in callback loop using `vscode://` URI handlers.
+ *
+ * Token flow:
+ * 1. Backend /auth/login creates a Firebase custom token
+ * 2. Extension receives it via URI callback
+ * 3. Extension exchanges it for a real ID token via REST API
+ * 4. ID token is sent as Bearer token on all API requests
+ * 5. On 401, extension refreshes the ID token using the refresh token
  */
 export class AuthManager implements vscode.UriHandler {
   private _onDidSignIn = new vscode.EventEmitter<{ uid: string; token: string }>();
@@ -24,10 +36,6 @@ export class AuthManager implements vscode.UriHandler {
 
   // ── URI Handler ────────────────────────────────────────────────────────────
 
-  /**
-   * Register this class as the extension's URI handler.
-   * VS Code will call handleUri when a vscode://<extension-id>?... URL is opened.
-   */
   registerUriHandler(): void {
     this.context.subscriptions.push(
       vscode.window.registerUriHandler(this)
@@ -36,74 +44,72 @@ export class AuthManager implements vscode.UriHandler {
 
   /**
    * Called by VS Code when a vscode://<extension-id>?uid=...&token=... URI is received.
+   * The `token` here is a Firebase *custom* token. We exchange it for a real ID token.
    */
   async handleUri(uri: vscode.Uri): Promise<void> {
     const query = new URLSearchParams(uri.query);
     const uid = query.get('uid');
-    const token = query.get('token');
+    const customToken = query.get('token');
 
-    if (!uid || !token) {
+    if (!uid || !customToken) {
       vscode.window.showErrorMessage('ContextLens: Sign-in failed — missing uid or token in callback.');
       return;
     }
 
-    // Store in SecretStorage
-    await this.context.secrets.store(SECRET_TOKEN_KEY, token);
-    await this.context.secrets.store(SECRET_UID_KEY, uid);
+    try {
+      // Exchange the custom token for a real Firebase ID token
+      const exchangeResult = await exchangeCustomTokenForIdToken(customToken);
 
-    // Notify listeners
-    this._onDidSignIn.fire({ uid, token });
+      // Store the real ID token (verifiable by backend) and refresh token
+      await this.context.secrets.store(SECRET_ID_TOKEN_KEY, exchangeResult.idToken);
+      await this.context.secrets.store(SECRET_REFRESH_TOKEN_KEY, exchangeResult.refreshToken);
+      await this.context.secrets.store(SECRET_UID_KEY, exchangeResult.localId); // real UID from Firebase
 
-    // Resolve any pending ensureSignedIn() promise
-    if (this.signInResolver) {
-      this.signInResolver({ uid, token });
-      this.signInResolver = null;
+      // Clean up legacy token if present
+      await this.context.secrets.delete(SECRET_TOKEN_KEY);
+
+      // Notify listeners
+      this._onDidSignIn.fire({ uid: exchangeResult.localId, token: exchangeResult.idToken });
+
+      // Resolve any pending ensureSignedIn() promise
+      if (this.signInResolver) {
+        this.signInResolver({ uid: exchangeResult.localId, token: exchangeResult.idToken });
+        this.signInResolver = null;
+      }
+
+      vscode.window.showInformationMessage('ContextLens: Sign-in successful! ✦');
+    } catch (err: any) {
+      console.error('Token exchange failed:', err);
+      vscode.window.showErrorMessage(`ContextLens: Sign-in failed — ${err.message}`);
     }
-
-    vscode.window.showInformationMessage('ContextLens: Sign-in successful! ✦');
   }
 
   // ── Sign In / Out ──────────────────────────────────────────────────────────
 
-  /**
-   * Opens the browser to the backend /auth/login route with a callback
-   * URI that points back to this extension.
-   */
   async signIn(): Promise<{ uid: string; token: string }> {
-    // Use vscode.env.uriScheme to support both 'vscode' and 'vscode-insiders'
-    // Bypassing asExternalUri here to prevent resolving to unknown schemes like 'antigravity:'
-    // which the local OS browser might not understand.
     const callbackUriStr = `${vscode.env.uriScheme}://${EXTENSION_ID}`;
-
     const loginUrl = `${API_BASE}/auth/login?callback=${encodeURIComponent(callbackUriStr)}`;
 
     await vscode.env.openExternal(vscode.Uri.parse(loginUrl));
 
-    // Return a promise that resolves when handleUri fires
     return new Promise<{ uid: string; token: string }>((resolve) => {
       this.signInResolver = resolve;
     });
   }
 
-  /**
-   * If already signed in (token exists in SecretStorage), returns immediately.
-   * Otherwise triggers signIn() and waits for the callback.
-   */
   async ensureSignedIn(): Promise<{ uid: string; token: string }> {
     const existing = await this.loadAuthState();
     if (existing) {
       return existing;
     }
-
     return this.signIn();
   }
 
-  /**
-   * Clear stored credentials.
-   */
   async signOut(): Promise<void> {
-    await this.context.secrets.delete(SECRET_TOKEN_KEY);
+    await this.context.secrets.delete(SECRET_ID_TOKEN_KEY);
+    await this.context.secrets.delete(SECRET_REFRESH_TOKEN_KEY);
     await this.context.secrets.delete(SECRET_UID_KEY);
+    await this.context.secrets.delete(SECRET_TOKEN_KEY); // legacy cleanup
     this._onDidSignOut.fire();
     vscode.window.showInformationMessage('ContextLens: Signed out.');
   }
@@ -111,16 +117,38 @@ export class AuthManager implements vscode.UriHandler {
   // ── Getters ────────────────────────────────────────────────────────────────
 
   async loadAuthState(): Promise<{ uid: string; token: string } | null> {
-    const token = await this.context.secrets.get(SECRET_TOKEN_KEY);
+    const idToken = await this.context.secrets.get(SECRET_ID_TOKEN_KEY);
     const uid = await this.context.secrets.get(SECRET_UID_KEY);
-    if (token && uid) {
-      return { uid, token };
+    if (idToken && uid) {
+      return { uid, token: idToken };
     }
+
+    // Fallback: check for legacy token (pre-upgrade)
+    const legacyToken = await this.context.secrets.get(SECRET_TOKEN_KEY);
+    if (legacyToken && uid) {
+      // Legacy custom token — can't be used directly anymore.
+      // Clear and force re-sign-in.
+      await this.context.secrets.delete(SECRET_TOKEN_KEY);
+      return null;
+    }
+
     return null;
   }
 
+  /**
+   * Get the Firebase ID token for API requests.
+   * This is a REAL ID token (verifiable by admin.auth().verifyIdToken()).
+   */
+  async getIdToken(): Promise<string | undefined> {
+    return this.context.secrets.get(SECRET_ID_TOKEN_KEY);
+  }
+
+  /**
+   * @deprecated Use getIdToken() instead
+   */
   async getToken(): Promise<string | undefined> {
-    return this.context.secrets.get(SECRET_TOKEN_KEY);
+    // Return ID token for backward compat
+    return this.getIdToken();
   }
 
   async getUid(): Promise<string | undefined> {
@@ -128,12 +156,34 @@ export class AuthManager implements vscode.UriHandler {
   }
 
   /**
+   * Attempt to refresh the ID token using the stored refresh token.
+   * Returns true if refresh succeeded, false otherwise.
+   */
+  async tryRefreshToken(): Promise<boolean> {
+    try {
+      const currentRefreshToken = await this.context.secrets.get(SECRET_REFRESH_TOKEN_KEY);
+      if (!currentRefreshToken) {
+        return false;
+      }
+
+      const result = await refreshIdToken(currentRefreshToken);
+      await this.context.secrets.store(SECRET_ID_TOKEN_KEY, result.id_token);
+      await this.context.secrets.store(SECRET_REFRESH_TOKEN_KEY, result.refresh_token);
+      return true;
+    } catch (err) {
+      console.error('Token refresh failed:', err);
+      return false;
+    }
+  }
+
+  /**
    * Clear stored credentials and prompt to re-sign-in.
-   * Used by apiClient when a 401 is received.
    */
   async handleSessionExpired(): Promise<void> {
-    await this.context.secrets.delete(SECRET_TOKEN_KEY);
+    await this.context.secrets.delete(SECRET_ID_TOKEN_KEY);
+    await this.context.secrets.delete(SECRET_REFRESH_TOKEN_KEY);
     await this.context.secrets.delete(SECRET_UID_KEY);
+    await this.context.secrets.delete(SECRET_TOKEN_KEY); // legacy
 
     const action = await vscode.window.showWarningMessage(
       'ContextLens: Session expired. Please sign in again.',

@@ -1,41 +1,57 @@
 const { auth } = require('../firebase');
 
 /**
- * Auth middleware — hackathon-friendly.
- * 
+ * Auth middleware — production-ready.
+ *
  * Behavior:
- *   - If a valid Firebase ID token is provided → use the real uid.
- *   - If the token is a custom token (not an ID token) → fallback to demo user.
- *   - If no token is provided → fallback to demo user.
- * 
- * In production, the no-token and invalid-token cases would return 401.
+ *   - Requires a valid Firebase ID token in the Authorization header.
+ *   - Extracts the real UID from the verified token.
+ *   - Returns 401 for missing, invalid, or expired tokens.
+ *
+ * Note: The VS Code extension must send the Firebase ID token
+ * (obtained after signInWithCustomToken), NOT the custom token itself.
  */
 async function requireAuth(req, res, next) {
   try {
     const authHeader = req.headers.authorization || '';
 
     if (!authHeader.startsWith('Bearer ')) {
-      // No token provided — use demo user for hackathon
-      req.user = { uid: 'contextlens-demo-user', email: null, name: null };
-      return next();
+      return res.status(401).json({
+        error: {
+          code: 'unauthenticated',
+          message: 'No authorization token provided. Please sign in.',
+        },
+      });
     }
 
     const token = authHeader.split(' ')[1];
 
     try {
-      // Try to verify as a real Firebase ID token
       const decoded = await auth.verifyIdToken(token);
-      req.user = { uid: decoded.uid, email: decoded.email || null, name: decoded.name || null };
+      req.user = {
+        uid: decoded.uid,
+        email: decoded.email || null,
+        name: decoded.name || null,
+      };
     } catch (verifyErr) {
-      // Token might be a custom token (not an ID token) — fallback for hackathon
-      // In production you would reject here with 401
-      req.user = { uid: 'contextlens-demo-user', email: null, name: null };
+      console.error('Token verification failed:', verifyErr.code || verifyErr.message);
+      return res.status(401).json({
+        error: {
+          code: 'invalid_token',
+          message: 'Invalid or expired token. Please sign in again.',
+        },
+      });
     }
 
     return next();
   } catch (err) {
     console.error('Auth middleware error:', err);
-    return res.status(401).json({ error: { code: 'unauthenticated', message: 'Authentication failed' } });
+    return res.status(401).json({
+      error: {
+        code: 'unauthenticated',
+        message: 'Authentication failed',
+      },
+    });
   }
 }
 

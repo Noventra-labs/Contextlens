@@ -60,7 +60,7 @@ export function Sidebar() {
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
   const { projectId: activeProjectId } = useParams()
-  const { data: projects } = useProjects(user?.uid || 'contextlens-demo-user')
+  const { data: projects } = useProjects(user?.uid ?? '')
 
   const handleSignOut = async () => {
     await signOut()
@@ -129,7 +129,7 @@ export function Sidebar() {
                   </Link>
                   {isActive && (
                     <BranchList
-                      uid={user?.uid || 'contextlens-demo-user'}
+                      uid={user?.uid ?? ''}
                       projectId={project.id}
                       activeProjectId={activeProjectId ?? ''}
                     />

@@ -166,21 +166,6 @@ export function LoginPage() {
               {loadingProvider === 'github' ? 'Signing in...' : 'Sign in with GitHub'}
             </button>
 
-            <div className="relative py-4">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-cardBorder"></div>
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-card px-2 text-textMuted">Or</span>
-              </div>
-            </div>
-
-            <button
-              onClick={() => navigate('/dashboard')}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-cardBorder hover:bg-gray-800/30 text-textPrimary font-medium transition-all text-sm"
-            >
-              Explore Demo Dashboard
-            </button>
           </div>
 
           {error && (

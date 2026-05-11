@@ -4,9 +4,9 @@ import { useAuth } from '../../context/AuthContext'
 import { useProjects } from '../../lib/firestoreHooks'
 
 export function TopBar() {
-  const { user, migrating } = useAuth()
+  const { user } = useAuth()
   const { projectId, episodeId, branchName } = useParams()
-  const { data: projects } = useProjects(user?.uid || 'contextlens-demo-user')
+  const { data: projects } = useProjects(user?.uid ?? '')
   const matches = useMatches()
 
   const currentProject = projects.find((p) => p.id === projectId)
@@ -58,12 +58,6 @@ export function TopBar() {
 
       {/* Right actions */}
       <div className="flex items-center gap-3">
-        {migrating && (
-          <div className="flex items-center gap-2 px-3 py-1 bg-primary/10 border border-primary/20 rounded-full text-[10px] text-primary font-medium animate-pulse">
-            <div className="w-1.5 h-1.5 bg-primary rounded-full animate-ping" />
-            Syncing Demo Data...
-          </div>
-        )}
         <button className="p-1.5 rounded-md text-textMuted hover:text-textPrimary hover:bg-gray-800/40 transition-colors">
           <Search className="w-4 h-4" />
         </button>

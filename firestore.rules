@@ -2,12 +2,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Demo user: public read, no writes from clients
-    match /users/contextlens-demo-user/{document=**} {
-      allow read: if true;
-      allow write: if false;
-    }
-
     // Authenticated users: full access to own data only
     match /users/{userId}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId;

@@ -11,12 +11,11 @@ import {
   type AuthCredential,
 } from 'firebase/auth'
 import { auth } from '../lib/firebase'
-import { useMigrateDemoData } from '../lib/firestoreHooks'
+
 
 interface AuthContextType {
   user: User | null
   loading: boolean
-  migrating: boolean
   signInWithGoogle: () => Promise<any>
   signInWithGithub: () => Promise<any>
   signOut: () => Promise<void>
@@ -29,20 +28,14 @@ const AuthContext = createContext<AuthContextType | null>(null)
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
-  const { migrate, migrating } = useMigrateDemoData()
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u)
       setLoading(false)
-      
-      // Trigger migration if user is logged in
-      if (u) {
-        migrate(u.uid)
-      }
     })
     return () => unsub()
-  }, [migrate])
+  }, [])
 
   const signInWithGoogle = async () => {
     const provider = new GoogleAuthProvider()
@@ -69,7 +62,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, migrating, signInWithGoogle, signInWithGithub, signOut, fetchProviders, linkAccount }}
+      value={{ user, loading, signInWithGoogle, signInWithGithub, signOut, fetchProviders, linkAccount }}
     >
       {children}
     </AuthContext.Provider>

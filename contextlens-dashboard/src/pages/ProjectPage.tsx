@@ -14,12 +14,12 @@ import { GitBranch, X } from 'lucide-react'
 export function ProjectPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const { user } = useAuth()
-  const { data: projects, loading: projectsLoading, error: projectsError } = useProjects(user?.uid || 'contextlens-demo-user')
+  const { data: projects, loading: projectsLoading, error: projectsError } = useProjects(user?.uid ?? '')
   const {
     data: episodes,
     loading: episodesLoading,
     error: episodesError,
-  } = useEpisodes(user?.uid || 'contextlens-demo-user', projectId ?? '')
+  } = useEpisodes(user?.uid ?? '', projectId ?? '')
 
   const project = projects.find((p) => p.id === projectId)
 
@@ -180,7 +180,7 @@ export function ProjectPage() {
         <EpisodeTimeline
           episodes={filteredEpisodes}
           projectId={projectId ?? ''}
-          uid={user?.uid || 'contextlens-demo-user'}
+          uid={user?.uid ?? ''}
         />
       )}
     </div>
