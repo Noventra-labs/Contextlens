@@ -4,3 +4,5 @@
 
 [2026-05-12 06:26:32] Backend: Middleware now verifies Firebase ID tokens strictly.
 
+[2026-05-12 06:26:32] Extension: Implemented secure URI handler for auth callbacks.
+
