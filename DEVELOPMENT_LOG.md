@@ -6,3 +6,5 @@
 
 [2026-05-12 06:26:32] Extension: Implemented secure URI handler for auth callbacks.
 
+[2026-05-12 06:26:32] Dashboard: Removed all legacy demo-user UI components.
+
