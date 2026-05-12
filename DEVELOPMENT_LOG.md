@@ -28,3 +28,5 @@
 
 [2026-05-12 06:26:34] Extension: Improved chat view styling with VS Code theme variables.
 
+[2026-05-12 06:26:34] Backend: Added CORS configuration for verified dashboard domains.
+
