@@ -16,3 +16,5 @@
 
 [2026-05-12 06:26:33] Backend: Added environment variable validation for production.
 
+[2026-05-12 06:26:33] Dashboard: Optimized TopBar layout for mobile responsiveness.
+
