@@ -50,3 +50,5 @@
 
 [2026-05-12 06:26:35] Backend: Added health check endpoint at /api/health.
 
+[2026-05-12 06:26:35] Extension: Improved error messages for session expiration.
+
