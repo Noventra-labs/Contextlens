@@ -38,3 +38,5 @@
 
 [2026-05-12 06:26:34] Backend: Added rate limiting to prevent API abuse.
 
+[2026-05-12 06:26:34] Extension: Implemented episode search in the tree view.
+
