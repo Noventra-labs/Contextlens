@@ -20,3 +20,5 @@
 
 [2026-05-12 06:26:33] Extension: Added keyboard shortcuts for episode management.
 
+[2026-05-12 06:26:33] Backend: Improved error logging for failed token exchanges.
+
