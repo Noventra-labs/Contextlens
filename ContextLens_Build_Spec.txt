@@ -1,0 +1,84 @@
+# ContextLens: Build Specification & Architecture
+
+ContextLens is an autonomous coding observability platform that tracks development "episodes," logs AI interactions, and provides Gemini-powered insights into code evolution.
+
+## 1. System Architecture
+
+The system consists of three primary components:
+- **VS Code Extension**: The primary data collector and user interface for developers.
+- **Backend (API)**: An Express-based service managing authentication, data persistence, and Gemini integrations.
+- **Dashboard (Web)**: A React-based visualization interface for reviewing project history and branch summaries.
+
+```mermaid
+graph TD
+    VSCode[VS Code Extension] -->|Auth/Sync| Backend[Express API]
+    VSCode -->|Autonomous Watchers| GitHead[.git/HEAD]
+    VSCode -->|Autonomous Watchers| GitCommit[.git/COMMIT_EDITMSG]
+    Backend -->|Persistence| Firestore[Firebase Firestore]
+    Backend -->|Auth| FirebaseAuth[Firebase Auth]
+    Backend -->|Analysis| Gemini[Gemini 1.5 Pro]
+    Web[React Dashboard] -->|View Data| Backend
+```
+
+## 2. Component Details
+
+### A. VS Code Extension (`/vscode-extension`)
+- **`AuthManager`**: Manages OIDC flow with Google. Handles token storage and automatic refresh.
+- **`EpisodeStore`**: Maintains workspace-level state for the active task ("Episode"). Handles project auto-resolution via git remotes.
+- **`SyncEngine`**: A robust background worker with an offline-first queue. Persists unsynced items to disk and retries on failure.
+- **`Watchers`**:
+    - `watchBranch`: Auto-closes/opens episodes on branch switch.
+    - `watchCommits`: Logs commit messages as task milestones.
+    - `watchFileSaves`: Tracks changed files for diff context.
+- **`GitContext`**: Utility to extract branch, diffs, and "TODO" markers from the local environment.
+
+### B. Backend API (`/src`)
+- **`firebase.js`**: Service account initialization for Firestore and Auth.
+- **`routes/api.js`**: Core endpoints:
+    - `POST /projects/create`: Resolve or create project records.
+    - `POST /episodes/create`: Start a new task session.
+    - `POST /calls/log`: Save AI interactions with full context.
+    - `POST /episodes/explain`: Generate diff analysis via Gemini.
+- **`services/ai.js`**: Gemini 1.5 Pro integration for summarizing branches and explaining code changes.
+
+### C. Web Dashboard (`/contextlens-dashboard`)
+- **React + Vite + Tailwind**: Modern frontend for high-performance data visualization.
+- **`pages/Dashboard`**: Project-level view showing active branches and recent episodes.
+- **`pages/EpisodeDetail`**: Deep dive into a specific task, showing AI calls, files changed, and summaries.
+
+## 3. Core Workflows
+
+### 1. Autonomous Episode Initialization
+1. Extension activates and detects a workspace.
+2. `AuthManager` checks for a valid session.
+3. `EpisodeStore` checks if a project exists for this git remote; creates one if missing.
+4. `Watchers` detect the current branch and auto-create an "Episode" if none is active.
+
+### 2. High-Fidelity Interaction Logging
+1. Developer interacts with an AI (e.g., Claude, Copilot).
+2. Developer uses "Log External Call" or extension detects AI call (via `callGemini` helper).
+3. Extension captures:
+    - Prompt & Response
+    - Current Branch & Active File
+    - Git Diff Snapshot
+    - Project TODO matches
+4. `SyncEngine` enqueues the log and sends it to the backend via a batched background process.
+
+### 3. Diff Analysis & Branch Summarization
+1. Developer triggers "Explain Diff" command.
+2. Backend fetches the diff snapshot.
+3. Gemini analyzes the changes for risks, architectural shifts, and missing tests.
+4. Results are displayed in a native VS Code webview or the web dashboard.
+
+## 4. Technology Stack
+- **Languages**: TypeScript (Extension/Dashboard), JavaScript (Backend).
+- **Backend**: Node.js, Express, Handlebars (Legacy Views).
+- **Database**: Google Cloud Firestore.
+- **AI**: Google Gemini 1.5 Pro.
+- **Cloud**: Firebase Hosting & Cloud Functions (Deployment targets).
+- **Styling**: Tailwind CSS (Dashboard), Vanilla CSS (Extension Webviews).
+
+## 5. Development Guidelines
+- **Offline First**: All telemetry from the extension must pass through the `SyncEngine`.
+- **Zero Friction**: Prefer automatic event detection (watchers) over manual logging where possible.
+- **Context Rich**: Always include git diffs and file paths in AI logs to improve downstream analysis.

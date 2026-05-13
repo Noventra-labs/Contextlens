@@ -1,0 +1,934 @@
+================================================================
+CONTEXTLENS — COMPLETE AUTONOMY + SMART SYNC
+Version 2 — Updated with interval sync, offline buffer,
+small packets, no cost leaks, no frequent transfers
+================================================================
+
+RULES
+-----
+1. Zero manual steps after first sign-in
+2. Gemini NEVER called automatically — only on button click
+3. Nothing sends immediately — everything buffers first
+4. Flush every 30 seconds in small chunks of 5 items
+5. If offline — persist to disk, send when back online
+6. Chat messages send immediately (need Gemini response)
+7. Everything else (commits, file saves) goes to queue
+
+================================================================
+FILE 1 — src/syncEngine.ts  (NEW FILE)
+================================================================
+
+CREATE: vscode-extension/src/syncEngine.ts
+
+----------------------------------------------------------------
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+
+export interface QueuedItem {
+  id: string;
+  type: 'call' | 'episode_update' | 'changed_files' | 'episode_close';
+  endpoint: string;
+  payload: any;
+  createdAt: number;
+  retries: number;
+  projectId: string;
+  episodeId: string;
+}
+
+export class SyncEngine {
+  private queue: QueuedItem[] = [];
+  private isOnline: boolean = true;
+  private isFlushing: boolean = false;
+  private flushTimer: ReturnType<typeof setInterval> | null = null;
+  private connectivityTimer: ReturnType<typeof setInterval> | null = null;
+  private persistPath: string = '';
+  private context: vscode.ExtensionContext;
+  private apiClient: any;
+
+  private readonly FLUSH_INTERVAL_MS = 30_000;     // flush every 30s
+  private readonly CONNECTIVITY_CHECK_MS = 15_000; // check online every 15s
+  private readonly CHUNK_SIZE = 5;                 // max 5 items per flush
+  private readonly MAX_RETRIES = 5;                // drop after 5 failures
+  private readonly MAX_QUEUE_SIZE = 200;           // max buffered items
+  private readonly ITEM_DELAY_MS = 200;            // delay between items
+
+  constructor(options: {
+    context: vscode.ExtensionContext;
+    apiClient: any;
+  }) {
+    this.context = options.context;
+    this.apiClient = options.apiClient;
+
+    // Set persist path in VS Code extension global storage
+    const storagePath = options.context.globalStorageUri?.fsPath;
+    if (storagePath) {
+      this.persistPath = path.join(storagePath, 'cl_queue.json');
+    }
+
+    // Load unsynced items from previous session
+    this.loadFromDisk();
+
+    // Start timers
+    this.startFlushTimer();
+    this.startConnectivityTimer();
+
+    // Cleanup on extension deactivate
+    options.context.subscriptions.push({
+      dispose: () => this.dispose()
+    });
+  }
+
+  // ─── PUBLIC API ─────────────────────────────────────────
+
+  // Add item to queue — returns immediately, never blocks
+  enqueue(
+    item: Omit<QueuedItem, 'id' | 'createdAt' | 'retries'>
+  ): void {
+    // Drop oldest if full
+    if (this.queue.length >= this.MAX_QUEUE_SIZE) {
+      this.queue.shift();
+    }
+
+    this.queue.push({
+      ...item,
+      id: uid(),
+      createdAt: Date.now(),
+      retries: 0,
+    });
+
+    // Save to disk immediately
+    // so data survives VS Code closing before flush
+    this.saveToDisk();
+  }
+
+  // Force flush — call before Gemini button actions
+  // so episode state is current before Gemini reads it
+  async forceFlush(): Promise<void> {
+    if (!this.isOnline || this.isFlushing) return;
+    await this.flush();
+  }
+
+  // Status for status bar
+  getStatus(): { pending: number; isOnline: boolean } {
+    return {
+      pending: this.queue.length,
+      isOnline: this.isOnline,
+    };
+  }
+
+  // ─── FLUSH ──────────────────────────────────────────────
+
+  private async flush(): Promise<void> {
+    if (this.isFlushing) return;
+    if (this.queue.length === 0) return;
+    if (!this.isOnline) return;
+
+    this.isFlushing = true;
+
+    try {
+      // Take first CHUNK_SIZE items only
+      const chunk = this.queue.slice(0, this.CHUNK_SIZE);
+
+      for (const item of chunk) {
+        try {
+          await this.apiClient.post(item.endpoint, item.payload);
+
+          // Remove on success
+          this.queue = this.queue.filter(q => q.id !== item.id);
+
+        } catch (err: any) {
+          item.retries++;
+
+          // Drop permanently after max retries
+          if (item.retries >= this.MAX_RETRIES) {
+            this.queue = this.queue.filter(q => q.id !== item.id);
+          }
+
+          // Network error — go offline, stop sending
+          if (isNetworkError(err)) {
+            this.isOnline = false;
+            break;
+          }
+        }
+
+        // Small delay between each item
+        // Prevents hammering the backend
+        await sleep(this.ITEM_DELAY_MS);
+      }
+
+    } finally {
+      this.isFlushing = false;
+      this.saveToDisk();
+    }
+  }
+
+  // ─── TIMERS ─────────────────────────────────────────────
+
+  private startFlushTimer(): void {
+    this.flushTimer = setInterval(async () => {
+      if (this.queue.length === 0) return;
+      if (!this.isOnline) return;
+      if (this.isFlushing) return;
+      await this.flush();
+    }, this.FLUSH_INTERVAL_MS);
+  }
+
+  private startConnectivityTimer(): void {
+    this.connectivityTimer = setInterval(async () => {
+      const wasOffline = !this.isOnline;
+      this.isOnline = await checkOnline();
+
+      // Just came back online
+      if (wasOffline && this.isOnline && this.queue.length > 0) {
+        vscode.window.setStatusBarMessage(
+          `ContextLens: Back online — syncing ${this.queue.length} buffered items...`,
+          4000
+        );
+        await this.flush();
+      }
+    }, this.CONNECTIVITY_CHECK_MS);
+  }
+
+  // ─── DISK PERSISTENCE ───────────────────────────────────
+
+  private saveToDisk(): void {
+    if (!this.persistPath) return;
+    try {
+      const dir = path.dirname(this.persistPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      // Save max 100 items to keep file tiny
+      const toSave = this.queue.slice(-100);
+      fs.writeFileSync(
+        this.persistPath,
+        JSON.stringify(toSave),
+        'utf8'
+      );
+    } catch {
+      // Silent fail
+    }
+  }
+
+  private loadFromDisk(): void {
+    if (!this.persistPath) return;
+    try {
+      if (!fs.existsSync(this.persistPath)) return;
+      const raw = fs.readFileSync(this.persistPath, 'utf8');
+      const saved: QueuedItem[] = JSON.parse(raw);
+      if (Array.isArray(saved) && saved.length > 0) {
+        this.queue = saved;
+        vscode.window.setStatusBarMessage(
+          `ContextLens: ${saved.length} items recovered from last session.`,
+          4000
+        );
+      }
+    } catch {
+      // Corrupt file — ignore
+    }
+  }
+
+  // ─── CLEANUP ────────────────────────────────────────────
+
+  dispose(): void {
+    if (this.flushTimer) clearInterval(this.flushTimer);
+    if (this.connectivityTimer) clearInterval(this.connectivityTimer);
+    // Final save before shutdown
+    this.saveToDisk();
+  }
+}
+
+// ─── HELPERS ──────────────────────────────────────────────
+
+function uid(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+function isNetworkError(err: any): boolean {
+  const msg = (err?.message || '').toLowerCase();
+  return (
+    msg.includes('network') ||
+    msg.includes('fetch failed') ||
+    msg.includes('econnrefused') ||
+    msg.includes('enotfound') ||
+    msg.includes('etimedout') ||
+    msg.includes('failed to fetch') ||
+    msg.includes('net::err')
+  );
+}
+
+async function checkOnline(): Promise<boolean> {
+  try {
+    const res = await fetch(
+      'https://us-central1-contextlens-backend-001.cloudfunctions.net/api/health',
+      { method: 'GET', signal: AbortSignal.timeout(5000) }
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+----------------------------------------------------------------
+
+
+================================================================
+FILE 2 — src/watchers.ts  (NEW FILE)
+================================================================
+
+CREATE: vscode-extension/src/watchers.ts
+
+----------------------------------------------------------------
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+import { captureGitContext } from './gitContext';
+
+export interface WatcherDeps {
+  context: vscode.ExtensionContext;
+  episodeStore: any;
+  apiClient: any;
+  stateTreeProvider: any;
+  statusBar: any;
+}
+
+let lastBranch: string | null = null;
+let lastCommitMessage: string = '';
+let branchCooldown = false;
+let commitDebounce: ReturnType<typeof setTimeout> | null = null;
+
+// ─── MAIN ENTRY POINT ─────────────────────────────────────
+// Call once from activate() in extension.ts
+
+export async function startWatchers(
+  deps: WatcherDeps
+): Promise<void> {
+  const workspaceRoot =
+    vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) return;
+
+  const gitDir = path.join(workspaceRoot, '.git');
+
+  if (!fs.existsSync(gitDir)) {
+    watchForGitInit(workspaceRoot, deps);
+    return;
+  }
+
+  watchBranch(gitDir, deps);
+  watchCommits(gitDir, deps);
+  watchFileSaves(deps);
+  watchFolderChanges(deps);
+  startTokenRefresh(deps);
+  await autoInitEpisode(deps);
+}
+
+// ─── WATCHER 1: BRANCH ────────────────────────────────────
+// Watches: .git/HEAD
+// On branch switch: close episode, open new one
+// Cost: 0 Gemini, 1 Firestore write
+
+function watchBranch(gitDir: string, deps: WatcherDeps): void {
+  const headFile = path.join(gitDir, 'HEAD');
+  if (!fs.existsSync(headFile)) return;
+
+  const watcher = fs.watch(headFile, () => {
+    if (branchCooldown) return;
+    branchCooldown = true;
+
+    // Wait 2s for rebase/merge to finish
+    setTimeout(async () => {
+      branchCooldown = false;
+      try {
+        const git = await captureGitContext();
+        const branch = git.branchName;
+
+        if (!branch || branch === 'HEAD') return;
+        if (!lastBranch) { lastBranch = branch; return; }
+        if (branch === lastBranch) return;
+
+        lastBranch = branch;
+
+        // Close old episode silently (goes to sync queue)
+        const state = deps.episodeStore.getState();
+        if (state.episodeId) {
+          await deps.episodeStore.closeEpisodeSilent();
+        }
+
+        // Auto-create new episode for new branch
+        // Goes through sync queue — not immediate
+        await deps.episodeStore.autoCreateEpisode(branch, branch);
+
+        deps.stateTreeProvider.refresh();
+        deps.statusBar.render();
+
+        vscode.window.showInformationMessage(
+          `ContextLens: Branch "${branch}" — episode started.`
+        );
+      } catch { /* silent */ }
+    }, 2000);
+  });
+
+  deps.context.subscriptions.push({
+    dispose: () => watcher.close()
+  });
+}
+
+// ─── WATCHER 2: COMMITS ───────────────────────────────────
+// Watches: .git/COMMIT_EDITMSG
+// On commit: log to sync queue (no Gemini, no immediate send)
+// Cost: 0 Gemini, 1 Firestore write (batched)
+
+function watchCommits(gitDir: string, deps: WatcherDeps): void {
+  const file = path.join(gitDir, 'COMMIT_EDITMSG');
+  if (!fs.existsSync(file)) return;
+
+  try {
+    lastCommitMessage = fs.readFileSync(file, 'utf8').trim();
+  } catch { lastCommitMessage = ''; }
+
+  const watcher = fs.watch(file, () => {
+    if (commitDebounce) clearTimeout(commitDebounce);
+
+    commitDebounce = setTimeout(async () => {
+      try {
+        const raw = fs.readFileSync(file, 'utf8').trim();
+        const message = raw
+          .split('\n')
+          .filter((l: string) => !l.startsWith('#'))
+          .join('\n')
+          .trim();
+
+        if (!message || message === lastCommitMessage) return;
+        lastCommitMessage = message;
+
+        const state = deps.episodeStore.getState();
+        if (!state.projectId || !state.episodeId) return;
+
+        const git = await captureGitContext();
+
+        // Enqueue to sync buffer — NOT sent immediately
+        // source: git_commit means backend skips Gemini
+        deps.episodeStore.enqueueCall({
+          projectId: state.projectId,
+          episodeId: state.episodeId,
+          promptText: `git commit: ${message}`,
+          modelResponse: '',
+          source: 'git_commit',
+          modelName: 'git',
+          intentTag: message,
+          branchName: git.branchName,
+          activeFilePath: '',
+          relatedFiles: [],
+          diffSnapshot: git.diffSnapshot.slice(0, 2000),
+          todoMatches: [],
+        });
+
+        deps.stateTreeProvider.refresh();
+        deps.statusBar.render();
+
+      } catch { /* silent */ }
+    }, 1000); // 1s debounce
+  });
+
+  deps.context.subscriptions.push({
+    dispose: () => watcher.close()
+  });
+}
+
+// ─── WATCHER 3: FILE SAVES ────────────────────────────────
+// Event: onDidSaveTextDocument
+// On save: add file to in-memory list only
+//          batched Firestore write every 30s via sync engine
+// Cost: 0 Gemini, 1 Firestore write per 30s
+
+function watchFileSaves(deps: WatcherDeps): void {
+  const workspaceRoot =
+
+================================================================
+CONTEXTLENS — FULL AUTONOMY IMPLEMENTATION
+================================================================
+
+GOAL
+----
+Make ContextLens fully autonomous. Developer opens VS Code,
+opens a repo, and ContextLens handles everything silently.
+
+Zero manual steps after first-time sign-in.
+
+================================================================
+WHAT BECOMES AUTOMATIC
+================================================================
+
+CURRENTLY MANUAL → SHOULD BE AUTOMATIC
+---------------------------------------
+1. Creating an episode         → auto-create on branch open/switch
+2. Naming the episode          → auto-name from branch name
+3. Logging AI calls            → already auto in Gemini chat
+4. Tracking file changes       → auto on every file save
+5. Tracking git commits        → auto by watching .git/COMMIT_EDITMSG
+6. Closing an episode          → auto when branch switches
+7. Switching episode on switch → auto when branch switches
+8. Detecting new project       → already auto on workspace open
+9. Token refresh               → auto silent refresh in background
+10. External AI logging        → shell wrapper CLI (terminal)
+
+================================================================
+FILE 1 — src/watchers.ts  (NEW FILE)
+================================================================
+
+Create this file in your VS Code extension src/ folder.
+This is the core autonomy engine.
+
+----------------------------------------------------------------
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+import { captureGitContext } from './gitContext';
+
+// -------------------------------------------------------
+// TYPES
+// -------------------------------------------------------
+
+interface WatcherDeps {
+  context: vscode.ExtensionContext;
+  episodeStore: any;
+  apiClient: any;
+  stateTreeProvider: any;
+  statusBar: any;
+}
+
+// -------------------------------------------------------
+// MAIN WATCHER ENTRY POINT
+// Call this from activate() in extension.ts
+// -------------------------------------------------------
+
+export async function startWatchers(deps: WatcherDeps): Promise<void> {
+  const { context } = deps;
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) return;
+
+  const gitDir = path.join(workspaceRoot, '.git');
+  if (!fs.existsSync(gitDir)) {
+    // Not a git repo — watch for when it becomes one
+    watchForGitInit(workspaceRoot, deps);
+    return;
+  }
+
+  // Start all watchers
+  watchBranchChanges(gitDir, deps);
+  watchCommits(gitDir, deps);
+  watchFileSaves(deps);
+  watchWorkspaceFolderChanges(deps);
+  startTokenRefresh(deps);
+  autoInitEpisode(deps);
+}
+
+// -------------------------------------------------------
+// WATCHER 1 — BRANCH CHANGES
+// Watches .git/HEAD for branch switches
+// Auto-creates a new episode when branch changes
+// -------------------------------------------------------
+
+let lastBranch: string | null = null;
+const branchWatchers: fs.FSWatcher[] = [];
+
+function watchBranchChanges(gitDir: string, deps: WatcherDeps): void {
+  const { episodeStore, stateTreeProvider, statusBar } = deps;
+  const headFile = path.join(gitDir, 'HEAD');
+
+  if (!fs.existsSync(headFile)) return;
+
+  const watcher = fs.watch(headFile, async () => {
+    try {
+      const git = await captureGitContext();
+      const newBranch = git.branchName;
+
+      if (!lastBranch) {
+        lastBranch = newBranch;
+        return;
+      }
+
+      if (newBranch !== lastBranch && newBranch !== 'HEAD') {
+        const previousBranch = lastBranch;
+        lastBranch = newBranch;
+
+        // Close current episode for old branch
+        const state = episodeStore.getState();
+        if (state.episodeId) {
+          await episodeStore.closeEpisode();
+        }
+
+        // Auto-create new episode for new branch
+        await episodeStore.autoCreateEpisode(
+          `${newBranch}`,
+          newBranch
+        );
+
+        stateTreeProvider.refresh();
+        statusBar.render();
+
+        vscode.window.showInformationMessage(
+          `ContextLens: Switched to branch "${newBranch}" — new episode started automatically.`
+        );
+      }
+    } catch (err) {
+      // Silent fail — never interrupt the developer
+    }
+  });
+
+  branchWatchers.push(watcher);
+
+  // Store disposable
+  deps.context.subscriptions.push({
+    dispose: () => {
+      watcher.close();
+    }
+  });
+}
+
+// -------------------------------------------------------
+// WATCHER 2 — GIT COMMITS
+// Watches .git/COMMIT_EDITMSG
+// Every commit is auto-logged as a call in the episode
+// -------------------------------------------------------
+
+let lastCommitMessage: string | null = null;
+
+function watchCommits(gitDir: string, deps: WatcherDeps): void {
+  const { episodeStore, apiClient, stateTreeProvider, statusBar } = deps;
+  const commitFile = path.join(gitDir, 'COMMIT_EDITMSG');
+
+  if (!fs.existsSync(commitFile)) return;
+
+  // Read initial commit message to avoid false trigger on startup
+  try {
+    lastCommitMessage = fs.readFileSync(commitFile, 'utf8').trim();
+  } catch {
+    lastCommitMessage = '';
+  }
+
+  const watcher = fs.watch(commitFile, async () => {
+    try {
+      await new Promise(resolve => setTimeout(resolve, 300)); // debounce
+
+      const raw = fs.readFileSync(commitFile, 'utf8').trim();
+
+      // Ignore comment lines and unchanged messages
+      const message = raw
+        .split('\n')
+        .filter(l => !l.startsWith('#'))
+        .join('\n')
+        .trim();
+
+      if (!message || message === lastCommitMessage) return;
+      lastCommitMessage = message;
+
+      const state = episodeStore.getState();
+      if (!state.projectId || !state.episodeId) return;
+
+      const git = await captureGitContext();
+
+      // Log commit as a call in the current episode
+      await apiClient.logCall({
+        projectId: state.projectId,
+        episodeId: state.episodeId,
+        promptText: `git commit: ${message}`,
+        modelResponse: 'Commit recorded by ContextLens',
+        source: 'git_commit',
+        modelName: 'git',
+        intentTag: message,
+        branchName: git.branchName,
+        activeFilePath: '',
+        relatedFiles: git.relatedFiles,
+        diffSnapshot: git.diffSnapshot,
+        todoMatches: git.todoMatches,
+      });
+
+      stateTreeProvider.refresh();
+      statusBar.render();
+
+    } catch (err) {
+      // Silent fail
+    }
+  });
+
+  deps.context.subscriptions.push({
+    dispose: () => watcher.close()
+  });
+}
+
+// -------------------------------------------------------
+// WATCHER 3 — FILE SAVES
+// Every meaningful file save updates the episode's
+// changed files list silently
+// -------------------------------------------------------
+
+function watchFileSaves(deps: WatcherDeps): void {
+  const { context, episodeStore, stateTreeProvider } = deps;
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument(async (doc) => {
+      try {
+        const state = episodeStore.getState();
+        if (!state.episodeId) return;
+        if (!workspaceRoot) return;
+        if (!doc.uri.fsPath.startsWith(workspaceRoot)) return;
+
+        // Skip node_modules, .git, dist, build
+        const skipPatterns = [
+          'node_modules', '.git', 'dist', 'build',
+          '.next', 'out', '.cache', '__pycache__'
+        ];
+        if (skipPatterns.some(p => doc.uri.fsPath.includes(p))) return;
+
+        // Only track code files
+        const codeExtensions = [
+          '.ts', '.tsx', '.js', '.jsx', '.py', '.go',
+          '.java', '.kt', '.swift', '.rs', '.c', '.cpp',
+          '.cs', '.php', '.rb', '.dart', '.vue', '.svelte'
+        ];
+        const ext = path.extname(doc.uri.fsPath);
+        if (!codeExtensions.includes(ext)) return;
+
+        // Add to changed files list
+        await episodeStore.addChangedFile(doc.uri.fsPath);
+        stateTreeProvider.refresh();
+
+      } catch (err) {
+        // Silent fail
+      }
+    })
+  );
+}
+
+// -------------------------------------------------------
+// WATCHER 4 — WORKSPACE FOLDER CHANGES
+// When developer opens a new folder, auto-detect project
+// -------------------------------------------------------
+
+function watchWorkspaceFolderChanges(deps: WatcherDeps): void {
+  const { context, episodeStore, stateTreeProvider, statusBar } = deps;
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(async (event) => {
+      if (event.added.length > 0) {
+        await episodeStore.ensureProject(context);
+        await autoInitEpisode(deps);
+        stateTreeProvider.refresh();
+        statusBar.render();
+      }
+    })
+  );
+}
+
+// -------------------------------------------------------
+// WATCHER 5 — WATCH FOR GIT INIT
+// If folder is not yet a git repo, watch for git init
+// -------------------------------------------------------
+
+function watchForGitInit(workspaceRoot: string, deps: WatcherDeps): void {
+  const { context } = deps;
+
+  const watcher = fs.watch(workspaceRoot, async (event, filename) => {
+    if (filename === '.git') {
+      const gitDir = path.join(workspaceRoot, '.git');
+      if (fs.existsSync(gitDir)) {
+        watcher.close();
+        // Git repo initialized — start all watchers
+        await startWatchers(deps);
+      }
+    }
+  });
+
+  context.subscriptions.push({
+    dispose: () => watcher.close()
+  });
+}
+
+// -------------------------------------------------------
+// AUTO INIT — Create episode automatically on startup
+// if no active episode exists
+// -------------------------------------------------------
+
+export async function autoInitEpisode(deps: WatcherDeps): Promise<void> {
+  const { episodeStore } = deps;
+
+  try {
+    const state = episodeStore.getState();
+
+    // Already have an active episode — nothing to do
+    if (state.episodeId && state.episodeLabel) {
+      lastBranch = state.branchName;
+      return;
+    }
+
+    // No project yet — nothing to do
+    if (!state.projectId) return;
+
+    // Capture current branch and auto-create episode
+    const git = await captureGitContext();
+    lastBranch = git.branchName;
+
+    await episodeStore.autoCreateEpisode(
+      `${git.branchName}`,
+      git.branchName
+    );
+
+  } catch (err) {
+    // Silent fail
+  }
+}
+
+// -------------------------------------------------------
+// TOKEN AUTO-REFRESH
+// Silently refreshes Firebase ID token every 50 minutes
+// Firebase ID tokens expire after 60 minutes
+// -------------------------------------------------------
+
+function startTokenRefresh(deps: WatcherDeps): void {
+  const { context } = deps;
+
+  // Refresh every 50 minutes (tokens expire at 60 min)
+  const REFRESH_INTERVAL = 50 * 60 * 1000;
+
+  const intervalId = setInterval(async () => {
+    try {
+      await refreshFirebaseToken(context);
+    } catch (err) {
+      // Silent fail — next API call will handle auth error
+    }
+  }, REFRESH_INTERVAL);
+
+  context.subscriptions.push({
+    dispose: () => clearInterval(intervalId)
+  });
+}
+
+async function refreshFirebaseToken(
+  context: vscode.ExtensionContext
+): Promise<void> {
+  const refreshToken = await context.secrets.get('contextlens.refreshToken');
+  const apiKey = 'YOUR_FIREBASE_API_KEY'; // same key used in apiClient.ts
+
+  if (!refreshToken) return;
+
+  const res = await fetch(
+    `https://securetoken.googleapis.com/v1/token?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `grant_type=refresh_token&refresh_token=${refreshToken}`,
+    }
+  );
+
+  if (!res.ok) return;
+
+  const data = await res.json() as any;
+
+  if (data.id_token) {
+    await context.secrets.store('contextlens.token', data.id_token);
+  }
+  if (data.refresh_token) {
+    await context.secrets.store('contextlens.refreshToken', data.refresh_token);
+  }
+}
+----------------------------------------------------------------
+
+
+================================================================
+FILE 2 — src/episodeStore.ts  (ADD THESE METHODS)
+================================================================
+
+Add these methods to your existing EpisodeStore class.
+Do NOT replace the whole file — just add these methods.
+
+----------------------------------------------------------------
+// -------------------------------------------------------
+// AUTO CREATE EPISODE
+// Called by watchers automatically — no user input needed
+// -------------------------------------------------------
+async autoCreateEpisode(
+  label: string,
+  branchName?: string
+): Promise<void> {
+  // Close current episode if one is active
+  if (this.state.episodeId) {
+    try {
+      await this.closeEpisode();
+    } catch (err) {
+      // Continue even if close fails
+    }
+  }
+
+  // Use provided branch or detect it
+  const branch = branchName || this.state.branchName || 'main';
+
+  // Create the new episode automatically
+  try {
+    const result = await this.api.post('/episodes/create', {
+      projectId: this.state.projectId,
+      label: label,
+      branchName: branch,
+    });
+
+    this.state.episodeId = result.episodeId;
+    this.state.episodeLabel = label;
+    this.state.callCount = 0;
+    this.state.changedFiles = [];
+    this.state.branchName = branch;
+
+    // Persist to globalState
+    await this.context.globalState.update(
+      'contextlens.episodeId', result.episodeId
+    );
+    await this.context.globalState.update(
+      'contextlens.episodeLabel', label
+    );
+    await this.context.globalState.update(
+      'contextlens.branchName', branch
+    );
+    await this.context.globalState.update(
+      'contextlens.callCount', 0
+    );
+    await this.context.globalState.update(
+      'contextlens.changedFiles', []
+    );
+
+  } catch (err: any) {
+    // Silent fail — don't show error for auto operations
+  }
+}
+
+// -------------------------------------------------------
+// ADD CHANGED FILE
+// Called by file save watcher automatically
+// -------------------------------------------------------
+async addChangedFile(absolutePath: string): Promise<void> {
+  const workspaceRoot =
+    vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+
+  // Convert to relative path
+  const relativePath = absolutePath
+    .replace(workspaceRoot, '')
+    .replace(/^\//, '')
+    .replace(/^\\/, '');
+
+  // Don't add duplicates
+  if (this.state.changedFiles.includes(relativePath)) return;
+
+  this.state.changedFiles.push(relativePath);
+
+  await this.context.globalState.update(
+    'contextlens.changedFiles',
+    this.state.changedFiles
+  );
+}
+
+// -------------------------------------------------------
+// INCREMENT CALL COUNT
+// Called

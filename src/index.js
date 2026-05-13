@@ -284,6 +284,10 @@ const { onRequest } = require('firebase-functions/v2/https');
 
 // Mount routes
 // We handle both /api prefix (from Hosting) and direct paths
+/**
+ * Middleware to handle '/api' route prefixing.
+ * Normalizes requests coming through Firebase Hosting or direct paths.
+ */
 app.use((req, res, next) => {
   if (req.url.startsWith('/api')) {
     req.url = req.url.replace('/api', '');
@@ -294,6 +298,10 @@ app.use((req, res, next) => {
 
 app.use('/', requireAuth, api);
 
+/**
+ * Global error handler for the Express application.
+ * Logs the error and returns a standardized 500 response.
+ */
 app.use((err, req, res, next) => {
   console.error('Unhandled server error:', err);
   if (res.headersSent) return next(err);
@@ -301,6 +309,10 @@ app.use((err, req, res, next) => {
 });
 
 // Export as Firebase Function v2
+/**
+ * Firebase Cloud Function (v2) export for the ContextLens API.
+ * Configured with 512MiB memory, 300s timeout, and CORS enabled.
+ */
 exports.api = onRequest({
   region: 'us-central1',
   memory: '512MiB',

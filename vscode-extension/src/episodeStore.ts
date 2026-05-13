@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { ApiClient } from './apiClient';
 import { GitContext } from './gitContext';
 import { getAuthManager } from './auth';
+import { SyncEngine } from './syncEngine';
 
 export interface Episode {
   id: string;
@@ -12,18 +13,32 @@ export interface Episode {
   branchName: string;
 }
 
+/**
+ * Manages the state of "episodes" (development tasks) within the VS Code workspace.
+ * Handles persistence, project auto-resolution, and interaction with the SyncEngine.
+ * Implements a Singleton pattern.
+ */
 export class EpisodeStore {
   private static instance: EpisodeStore;
   private activeEpisode: Episode | null = null;
   private projectId: string | null = null;
   private projectName: string | null = null;
+  private syncEngine: SyncEngine | null = null;
   private onDidChangeEmitter = new vscode.EventEmitter<void>();
   public readonly onDidChange = this.onDidChangeEmitter.event;
 
   private constructor(private context: vscode.ExtensionContext) {
     this.load();
+    this.syncEngine = new SyncEngine({
+      context,
+      apiClient: ApiClient
+    });
   }
 
+  /**
+   * Initializes the singleton instance of EpisodeStore.
+   * @param context The VS Code extension context for storage and disposal.
+   */
   static initialize(context: vscode.ExtensionContext) {
     if (!EpisodeStore.instance) {
       EpisodeStore.instance = new EpisodeStore(context);
@@ -36,6 +51,9 @@ export class EpisodeStore {
 
   // ── Persistence ────────────────────────────────────────────────────────────
 
+  /**
+   * Loads state from the VS Code workspaceState.
+   */
   private load() {
     this.activeEpisode = this.context.workspaceState.get<Episode>('contextlens.activeEpisode') ?? null;
     this.projectId = this.context.workspaceState.get<string>('contextlens.projectId') ?? null;
@@ -63,11 +81,21 @@ export class EpisodeStore {
     return this.projectName;
   }
 
+  public getSyncStatus() {
+    return this.syncEngine?.getStatus() ?? { pending: 0, isOnline: false };
+  }
+
+  public async forceSync(): Promise<void> {
+    await this.syncEngine?.forceFlush();
+  }
+
   // ── Project auto-resolve ───────────────────────────────────────────────────
 
   /**
-   * Ensures a project exists for the current workspace.
-   * Gates on auth — will trigger sign-in if not authenticated.
+   * Ensures a project exists for the current workspace by checking git remotes.
+   * If no project is found, it attempts to create one on the backend.
+   * Gates on authentication.
+   * @returns The project ID if resolved/created, otherwise null.
    */
   public async ensureProject(): Promise<string | null> {
     if (this.projectId) {
@@ -123,8 +151,9 @@ export class EpisodeStore {
   // ── Episode lifecycle ──────────────────────────────────────────────────────
 
   /**
-   * Create a new episode via the backend, store the result locally.
-   * Gates on auth — will trigger sign-in if not authenticated.
+   * Creates a new episode on the backend and sets it as the active one.
+   * This is a blocking call typically triggered by a user action.
+   * @param name The descriptive label for the episode.
    */
   public async createEpisode(name: string): Promise<void> {
     // ── Auth gate ──
@@ -161,7 +190,8 @@ export class EpisodeStore {
   }
 
   /**
-   * Close the active episode via the backend.
+   * Closes the currently active episode.
+   * Sends a blocking request to the backend.
    */
   public async closeEpisode(): Promise<void> {
     if (!this.activeEpisode || !this.projectId) {
@@ -181,6 +211,89 @@ export class EpisodeStore {
 
     this.activeEpisode = null;
     this.save();
+  }
+
+  /**
+   * Closes the active episode asynchronously via the SyncEngine.
+   * Useful for automatic triggers where blocking is undesirable.
+   */
+  public async closeEpisodeSilent(): Promise<void> {
+    if (!this.activeEpisode || !this.projectId) {
+      this.activeEpisode = null;
+      this.save();
+      return;
+    }
+
+    this.syncEngine?.enqueue({
+      type: 'episode_close',
+      endpoint: '/episodes/close',
+      projectId: this.projectId,
+      episodeId: this.activeEpisode.id,
+      payload: {
+        projectId: this.projectId,
+        episodeId: this.activeEpisode.id,
+      }
+    });
+
+    this.activeEpisode = null;
+    this.save();
+  }
+
+  /**
+   * Auto-creates an episode asynchronously via the SyncEngine.
+   * Assigns a temporary ID locally which is reconciled on the backend.
+   * @param name The label for the episode.
+   * @param branchName The branch name to associate.
+   */
+  public async autoCreateEpisode(name: string, branchName: string): Promise<void> {
+    if (!this.projectId) return;
+
+    // We generate a temporary ID so we can start logging calls immediately
+    const tempEpisodeId = `temp-${Date.now()}`;
+
+    this.syncEngine?.enqueue({
+      type: 'episode_create',
+      endpoint: '/episodes/create',
+      projectId: this.projectId,
+      payload: {
+        projectId: this.projectId,
+        label: name,
+        branchName,
+      }
+    });
+
+    this.activeEpisode = {
+      id: tempEpisodeId, // This will be reconciled on backend
+      name,
+      callCount: 0,
+      changedFiles: [],
+      note: '',
+      branchName,
+    };
+    this.save();
+  }
+
+  /**
+   * Enqueues an AI call log or git action to the SyncEngine.
+   * Automatically injects project and episode context.
+   * @param payload The data to be logged.
+   */
+  public enqueueCall(payload: any): void {
+    if (!this.projectId || !this.activeEpisode) return;
+
+    this.syncEngine?.enqueue({
+      type: 'call',
+      endpoint: '/calls/log',
+      projectId: this.projectId,
+      episodeId: this.activeEpisode.id,
+      payload: {
+        ...payload,
+        projectId: this.projectId,
+        episodeId: this.activeEpisode.id,
+      }
+    });
+
+    this.incrementCallCount();
   }
 
   public incrementCallCount() {

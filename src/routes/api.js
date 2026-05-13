@@ -7,6 +7,15 @@ const { explainDiffTemplate, branchSummaryTemplate } = require('../prompts');
 const { typedError, mapError } = require('../lib/errors');
 const { redactText, redactDeep } = require('../lib/redaction');
 
+/**
+ * Extracts structured data from an AI response or uses a fallback function if parsing fails.
+ * 
+ * @param {Object} response - The AI response object.
+ * @param {Object} [response.structured] - Already parsed structured data if available.
+ * @param {string} response.text - The raw text response from the model.
+ * @param {Function} fallback - A function that takes the raw text and returns a default structure.
+ * @returns {Object} The parsed or formatted response object.
+ */
 function structuredOrFallback(response, fallback) {
   if (response.structured && typeof response.structured === 'object') return response.structured;
   try {
