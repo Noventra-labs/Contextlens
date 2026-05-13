@@ -189,6 +189,15 @@ router.post('/branches/summarize', async (req, res) => {
   }
 });
 
+/**
+ * POST /search
+ * Performs a search across episodes and AI calls for a given project.
+ * 
+ * @param {express.Request} req - The request object.
+ * @param {string} req.body.projectId - The project ID.
+ * @param {string} req.body.q - The search query.
+ * @param {express.Response} res - The response object.
+ */
 router.post('/search', async (req, res) => {
   const { uid } = req.user;
   const { projectId, q, filters } = req.body;
@@ -214,6 +223,15 @@ router.post('/search', async (req, res) => {
   }
 });
 
+/**
+ * POST /episodes/close
+ * Marks a coding episode as closed.
+ * 
+ * @param {express.Request} req - The request object.
+ * @param {string} req.body.projectId - The project ID.
+ * @param {string} req.body.episodeId - The episode ID.
+ * @param {express.Response} res - The response object.
+ */
 router.post('/episodes/close', async (req, res) => {
   const { uid } = req.user;
   const { projectId, episodeId } = req.body;
