@@ -183,6 +183,12 @@ export class EpisodeStore {
    * @param name The descriptive label for the episode.
    */
   public async createEpisode(name: string): Promise<void> {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      vscode.window.showErrorMessage('ContextLens: Episode name cannot be empty.');
+      return;
+    }
+
     // ── Auth gate ──
     await getAuthManager().ensureSignedIn();
 
@@ -198,13 +204,13 @@ export class EpisodeStore {
     try {
       const res = await ApiClient.createEpisode({
         projectId,
-        label: name,
+        label: trimmedName,
         branchName,
       });
 
       this.activeEpisode = {
         id: res.episodeId,
-        name,
+        name: trimmedName,
         callCount: 0,
         changedFiles: [],
         note: '',
@@ -273,7 +279,8 @@ export class EpisodeStore {
    * @param branchName The branch name to associate.
    */
   public async autoCreateEpisode(name: string, branchName: string): Promise<void> {
-    if (!this.projectId) return;
+    const trimmedName = name.trim();
+    if (!this.projectId || !trimmedName) return;
 
     // We generate a temporary ID so we can start logging calls immediately
     const tempEpisodeId = `temp-${Date.now()}`;
@@ -284,18 +291,18 @@ export class EpisodeStore {
       projectId: this.projectId,
       payload: {
         projectId: this.projectId,
-        label: name,
-        branchName,
+        label: trimmedName,
+        branchName: branchName || 'main',
       }
     });
 
     this.activeEpisode = {
       id: tempEpisodeId, // This will be reconciled on backend
-      name,
+      name: trimmedName,
       callCount: 0,
       changedFiles: [],
       note: '',
-      branchName,
+      branchName: branchName || 'main',
     };
     this.save();
   }
@@ -351,7 +358,7 @@ export class EpisodeStore {
    */
   public updateNote(note: string) {
     if (this.activeEpisode) {
-      this.activeEpisode.note = note;
+      this.activeEpisode.note = note.trim();
       this.save();
     }
   }
