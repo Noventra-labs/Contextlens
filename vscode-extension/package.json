@@ -98,6 +98,35 @@
           "type": "webview"
         }
       ]
+    },
+    "keybindings": [
+      {
+        "command": "contextlens.newEpisode",
+        "key": "ctrl+alt+n",
+        "mac": "cmd+alt+n",
+        "when": "config.contextlens.enableShortcuts"
+      },
+      {
+        "command": "contextlens.closeEpisode",
+        "key": "ctrl+alt+x",
+        "mac": "cmd+alt+x",
+        "when": "config.contextlens.enableShortcuts"
+      }
+    ],
+    "configuration": {
+      "title": "ContextLens",
+      "properties": {
+        "contextlens.enableShortcuts": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable global keyboard shortcuts for ContextLens commands (e.g. Ctrl+Alt+N for New Episode)."
+        },
+        "contextlens.apiUrl": {
+          "type": "string",
+          "default": "https://us-central1-contextlens-backend-001.cloudfunctions.net/api",
+          "description": "The base URL for the ContextLens backend API."
+        }
+      }
     }
   },
   "scripts": {
