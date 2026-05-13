@@ -8,6 +8,10 @@ const DASHBOARD_BASE = 'https://contextlens-backend-001.web.app';
 // Firebase Web API key — needed to exchange custom tokens for ID tokens
 const FIREBASE_API_KEY = 'AIzaSyAQ2U7k1Z1h0myROPoj9upUMxJ-r_ZZ3ME';
 
+/**
+ * Internal helper to perform an HTTP request using node's native http/https modules.
+ * Returns a promise that resolves with the status code and raw response body.
+ */
 function httpRequest(url: string, options: {
   method: string;
   headers: Record<string, string>;
@@ -50,6 +54,9 @@ function httpRequest(url: string, options: {
  * Custom tokens received from the backend's /auth/login route cannot be
  * verified by admin.auth().verifyIdToken(). They must first be exchanged
  * for ID tokens via the identitytoolkit REST endpoint.
+ *
+ * @param customToken The custom token issued by the backend.
+ * @returns Object containing the ID token, refresh token, and local UID.
  */
 async function exchangeCustomTokenForIdToken(customToken: string): Promise<{
   idToken: string;
@@ -74,7 +81,10 @@ async function exchangeCustomTokenForIdToken(customToken: string): Promise<{
 }
 
 /**
- * Refresh an expired ID token using a refresh token.
+ * Refresh an expired ID token using a refresh token via Firebase Secure Token API.
+ *
+ * @param refreshToken The refresh token used to obtain a new ID token.
+ * @returns Object containing the new ID token and refresh token.
  */
 async function refreshIdToken(refreshToken: string): Promise<{
   id_token: string;
@@ -98,6 +108,11 @@ async function refreshIdToken(refreshToken: string): Promise<{
  * Authenticated POST request to the backend.
  * Pulls the Bearer token from AuthManager's SecretStorage.
  * On 401, attempts a token refresh before giving up.
+ *
+ * @template T The expected type of the response.
+ * @param path The API endpoint path (e.g., '/projects/create').
+ * @param body Optional JSON body for the POST request.
+ * @returns The parsed JSON response body cast to type T.
  */
 async function request<T>(path: string, body?: object): Promise<T> {
   const authManager = getAuthManager();
@@ -160,7 +175,28 @@ async function request<T>(path: string, body?: object): Promise<T> {
 
 // ── Project ──────────────────────────────────────────────────────────────────
 
+/**
+ * Client for interacting with the ContextLens backend API.
+ * All requests are authenticated via Firebase ID tokens.
+ */
 export class ApiClient {
+  /**
+   * Generic post method for SyncEngine or manual logging.
+   *
+   * @param endpoint The API path to post to.
+   * @param body The JSON payload.
+   * @returns The raw API response.
+   */
+  static async post(endpoint: string, body: object): Promise<any> {
+    return request(endpoint, body);
+  }
+
+  /**
+   * Registers a new project in the ContextLens system.
+   *
+   * @param body Metadata about the project including repository and workspace info.
+   * @returns The newly created project ID.
+   */
   static async createProject(body: {
     name: string;
     repoUrl?: string;
@@ -172,6 +208,12 @@ export class ApiClient {
 
   // ── Episode ──────────────────────────────────────────────────────────────
 
+  /**
+   * Starts a new coding episode for a given project.
+   *
+   * @param body The project ID, label, and current branch.
+   * @returns The newly created episode ID.
+   */
   static async createEpisode(body: {
     projectId: string;
     label: string;
@@ -180,6 +222,12 @@ export class ApiClient {
     return request('/episodes/create', body);
   }
 
+  /**
+   * Marks a coding episode as closed.
+   *
+   * @param body The project and episode identifiers.
+   * @returns Status indicating if the episode was successfully closed.
+   */
   static async closeEpisode(body: {
     projectId: string;
     episodeId: string;
@@ -189,6 +237,12 @@ export class ApiClient {
 
   // ── Calls ────────────────────────────────────────────────────────────────
 
+  /**
+   * Logs an AI interaction (call) within a specific episode.
+   *
+   * @param body Detailed payload containing prompt text, model info, and context (diffs, files).
+   * @returns The recorded call details and the AI-generated response.
+   */
   static async logCall(body: {
     projectId: string;
     episodeId: string;
@@ -215,6 +269,12 @@ export class ApiClient {
 
   // ── Explain Diff ─────────────────────────────────────────────────────────
 
+  /**
+   * Requests an AI-generated explanation and risk analysis for a specific diff hash.
+   *
+   * @param body Project context, episode context, and the diff hash to analyze.
+   * @returns A structured summary, risks, and checklist items.
+   */
   static async explainDiff(body: {
     projectId: string;
     episodeId: string;
@@ -231,6 +291,13 @@ export class ApiClient {
 
   // ── Branch Summary ───────────────────────────────────────────────────────
 
+  /**
+   * Generates a high-level summary of all changes on a branch across multiple episodes.
+   * Useful for generating Pull Request descriptions.
+   *
+   * @param body Context for the summarization task.
+   * @returns A comprehensive PR summary, key changes, and review risks.
+   */
   static async summarizeBranch(body: {
     projectId: string;
     branchName: string;
@@ -245,14 +312,23 @@ export class ApiClient {
 
   // ── Dashboard URLs ───────────────────────────────────────────────────────
 
+  /**
+   * Returns the dashboard web URL for a specific project.
+   */
   static dashboardUrl(projectId: string): string {
     return `${DASHBOARD_BASE}/dashboard/${projectId}`;
   }
 
+  /**
+   * Returns the dashboard web URL for a specific episode.
+   */
   static dashboardEpisodeUrl(projectId: string, episodeId: string): string {
     return `${DASHBOARD_BASE}/dashboard/${projectId}/episodes/${episodeId}`;
   }
 
+  /**
+   * Returns the dashboard web URL for a specific branch.
+   */
   static dashboardBranchUrl(projectId: string, branchName: string): string {
     return `${DASHBOARD_BASE}/dashboard/${projectId}/branch/${encodeURIComponent(branchName)}`;
   }
