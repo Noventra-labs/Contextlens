@@ -6,11 +6,23 @@ const SENSITIVE_PATTERNS = [
   /xox[baprs]-[A-Za-z0-9-]{10,}/g,
 ];
 
+/**
+ * Redacts sensitive patterns (API keys, tokens, etc.) from a string.
+ * 
+ * @param {string} input - The text to redact.
+ * @returns {string} The redacted text.
+ */
 function redactText(input) {
   if (typeof input !== 'string' || input.length === 0) return input;
   return SENSITIVE_PATTERNS.reduce((text, pattern) => text.replace(pattern, '[REDACTED]'), input);
 }
 
+/**
+ * Recursively redacts sensitive information from strings within an object or array.
+ * 
+ * @param {*} value - The value (object, array, or string) to redact.
+ * @returns {*} The redacted copy of the input.
+ */
 function redactDeep(value) {
   if (typeof value === 'string') return redactText(value);
   if (Array.isArray(value)) return value.map(redactDeep);
