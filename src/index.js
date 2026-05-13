@@ -246,8 +246,14 @@ app.get('/api/auth/login', async (req, res) => {
   }
 });
 
-// POST /api/auth/exchange — Verify a Firebase ID token and return a custom token.
-// Called by the login page's client-side JS after Google Sign-In.
+/**
+ * POST /api/auth/exchange
+ * Verifies a Firebase ID token and returns a custom token for the VS Code extension.
+ * 
+ * @param {express.Request} req - The request object.
+ * @param {string} req.body.idToken - The Firebase ID token received from client-side sign-in.
+ * @param {express.Response} res - The response object.
+ */
 app.post('/api/auth/exchange', async (req, res) => {
   try {
     const { idToken } = req.body;
