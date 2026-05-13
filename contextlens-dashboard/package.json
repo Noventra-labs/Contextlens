@@ -1,6 +1,15 @@
 {
   "name": "contextlens-dashboard",
   "private": true,
+  "description": "Premium web dashboard for ContextLens project visualization and AI insights.",
+  "author": "89Aman",
+  "keywords": [
+    "react",
+    "dashboard",
+    "ai",
+    "developer-tools",
+    "context"
+  ],
   "version": "1.0.0",
   "type": "module",
   "scripts": {
