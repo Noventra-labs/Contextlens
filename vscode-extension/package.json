@@ -1,14 +1,31 @@
 {
   "name": "contextlens",
   "displayName": "ContextLens",
-  "description": "ContextLens VS Code Extension",
+  "description": "AI-driven developer companion for capturing coding intent and context.",
   "version": "0.0.1",
-  "publisher": "noventra-Labs",
+  "publisher": "ContextLens",
+  "author": {
+    "name": "89Aman"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/89Aman/ContextLens"
+  },
   "engines": {
     "vscode": "^1.80.0"
   },
   "categories": [
-    "Other"
+    "Programming Languages",
+    "Data Science",
+    "Machine Learning"
+  ],
+  "keywords": [
+    "ai",
+    "context",
+    "gemini",
+    "tracking",
+    "developer-productivity"
   ],
   "activationEvents": [
     "onStartupFinished",
