@@ -7,6 +7,8 @@ import { ApiClient } from './apiClient';
 import { GitContext } from './gitContext';
 import { Telemetry } from './telemetry';
 import { createHash } from 'crypto';
+import { startWatchers } from './watchers';
+import { ContextLensStatusBar } from './statusBar';
 
 export function activate(context: vscode.ExtensionContext) {
   Telemetry.log('Extension activated');
@@ -28,50 +30,21 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   // ── Status bar ───────────────────────────────────────────────────────────
-
-  const statusBarItem = vscode.window.createStatusBarItem('contextlens.status', vscode.StatusBarAlignment.Left, 100);
-  statusBarItem.name = 'ContextLens';
-  statusBarItem.command = 'contextlens.openDashboard';
-  context.subscriptions.push(statusBarItem);
-  setStatusBarRef(statusBarItem);
-
-  const updateStatusBar = async () => {
-    const authState = await authManager.loadAuthState();
-
-    if (!authState) {
-      // BEFORE sign-in
-      statusBarItem.text = '$(account) ContextLens: Sign In';
-      statusBarItem.tooltip = 'Click to sign in to ContextLens';
-      statusBarItem.command = 'contextlens.signIn';
-      statusBarItem.color = new vscode.ThemeColor('statusBarItem.warningForeground');
-      statusBarItem.show();
-      return;
-    }
-
-    const ep = EpisodeStore.get().getActiveEpisode();
-
-    if (!ep) {
-      // AFTER sign-in — no episode yet
-      statusBarItem.text = '$(check) ContextLens: Ready';
-      statusBarItem.tooltip = 'Signed in — Click to open dashboard';
-      statusBarItem.command = 'contextlens.openDashboard';
-      statusBarItem.color = new vscode.ThemeColor('statusBarItem.prominentForeground');
-      statusBarItem.show();
-    } else {
-      // AFTER sign-in — episode active
-      statusBarItem.text = `$(circle-filled) ContextLens: ${ep.name} · ${ep.callCount} calls`;
-      statusBarItem.tooltip = `${ep.name} on ${ep.branchName} — ${ep.callCount} AI calls`;
-      statusBarItem.command = 'contextlens.openDashboardEpisode';
-      statusBarItem.color = new vscode.ThemeColor('statusBarItem.prominentForeground');
-      statusBarItem.show();
-    }
-  };
+  const statusBar = new ContextLensStatusBar(context, authManager);
 
   EpisodeStore.get().onDidChange(() => {
-    updateStatusBar();
+    statusBar.render();
     stateTreeProvider.refresh();
   });
-  updateStatusBar();
+
+  // ── Start Autonomous Watchers ───────────────────────────────────────────
+  startWatchers({
+    context,
+    episodeStore: EpisodeStore.get(),
+    apiClient: ApiClient,
+    stateTreeProvider,
+    statusBar: { render: () => statusBar.render() }
+  });
 
   // ── First-load sign-in prompt ────────────────────────────────────────────
 
@@ -82,7 +55,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (vscode.workspace.workspaceFolders?.length) {
         await EpisodeStore.get().ensureProject();
       }
-      updateStatusBar();
+      statusBar.render();
       stateTreeProvider.refresh();
     } else {
       // Not signed in → show a friendly prompt (non-blocking)
@@ -101,7 +74,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (vscode.workspace.workspaceFolders?.length) {
       await EpisodeStore.get().ensureProject();
     }
-    updateStatusBar();
+    statusBar.render();
     stateTreeProvider.refresh();
   });
 
@@ -115,7 +88,7 @@ export function activate(context: vscode.ExtensionContext) {
           await EpisodeStore.get().ensureProject();
         }
       }
-      updateStatusBar();
+      statusBar.render();
       stateTreeProvider.refresh();
     })
   );
@@ -142,7 +115,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('contextlens.signOut', async () => {
       await authManager.signOut();
-      updateStatusBar();
+      statusBar.render();
       stateTreeProvider.refresh();
     })
   );
@@ -283,6 +256,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('contextlens.openDashboard', async () => {
+      await EpisodeStore.get().forceSync(); // Sync before opening dashboard
       const projectId = EpisodeStore.get().getProjectId();
       if (!projectId) {
         const action = await vscode.window.showInformationMessage(
@@ -302,7 +276,8 @@ export function activate(context: vscode.ExtensionContext) {
   // ── Command: Open Dashboard (episode level) ──────────────────────────────
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('contextlens.openDashboardEpisode', () => {
+    vscode.commands.registerCommand('contextlens.openDashboardEpisode', async () => {
+      await EpisodeStore.get().forceSync(); // Sync before opening episode
       const store = EpisodeStore.get();
       const projectId = store.getProjectId();
       const episode = store.getActiveEpisode();
@@ -327,6 +302,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('contextlens.openDashboardBranch', async () => {
+      await EpisodeStore.get().forceSync(); // Sync before opening branch
       const projectId = EpisodeStore.get().getProjectId();
       if (!projectId) {
         vscode.window.showErrorMessage('No project detected.');
@@ -386,9 +362,7 @@ export function activate(context: vscode.ExtensionContext) {
       const gitCtx = await GitContext.getContext();
 
       try {
-        await ApiClient.logCall({
-          projectId,
-          episodeId: episode.id,
+        store.enqueueCall({
           source: 'manual_log',
           modelName: tool.toLowerCase(),
           intentTag: intentTag || undefined,
@@ -409,18 +383,14 @@ export function activate(context: vscode.ExtensionContext) {
       }
     })
   );
+
+  // ── Deactivation ──────────────────────────────────────────────────────────
+  context.subscriptions.push({
+    dispose: () => {
+      statusBar.hide();
+      statusBar.dispose();
+    }
+  });
 }
 
-let _statusBarItem: vscode.StatusBarItem | undefined;
-
-export function setStatusBarRef(item: vscode.StatusBarItem) {
-  _statusBarItem = item;
-}
-
-export function deactivate() {
-  if (_statusBarItem) {
-    _statusBarItem.hide();
-    _statusBarItem.dispose();
-    _statusBarItem = undefined;
-  }
-}
+export function deactivate() {}
