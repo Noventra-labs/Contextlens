@@ -1,3 +1,11 @@
+/**
+ * Creates a standardized error response object.
+ * 
+ * @param {string} code - The error code (e.g., 'not_found').
+ * @param {string} message - The human-readable error message.
+ * @param {Object} [details] - Optional extra details about the error.
+ * @returns {Object} The formatted error response.
+ */
 function typedError(code, message, details) {
   return {
     error: {
@@ -8,6 +16,12 @@ function typedError(code, message, details) {
   };
 }
 
+/**
+ * Maps a generic error or message to a standardized error response with status code.
+ * 
+ * @param {Error|Object} err - The error to map.
+ * @returns {Object} An object containing status, code, and message.
+ */
 function mapError(err) {
   const message = err && err.message ? err.message : 'Unknown error';
   if (/unauthenticated/i.test(message)) return { status: 401, code: 'unauthenticated', message };
