@@ -14,8 +14,21 @@ export interface QueuedItem {
 }
 
 /**
- * A background worker that manages a queue of API requests to be sent to the backend.
- * Provides offline support, disk persistence, and retry logic.
+ * SyncEngine is a background worker that ensures all development activity (AI calls, episodes)
+ * is eventually synchronized with the ContextLens backend, even if the user is offline.
+ * 
+ * Lifecycle:
+ * 1. Items are enqueued via `enqueue()`.
+ * 2. Enqueued items are immediately persisted to disk (`cl_queue.json`) to survive crashes.
+ * 3. Every 30s (`FLUSH_INTERVAL_MS`), the engine attempts to "flush" the queue.
+ * 4. A connectivity timer checks the backend health every 15s (`CONNECTIVITY_CHECK_MS`).
+ * 
+ * Retry Strategy:
+ * - Each item is tried up to 5 times (`MAX_RETRIES`).
+ * - If a request fails with a network error, the engine enters an "offline" state.
+ * - While offline, flushing is paused to save resources.
+ * - Once connectivity is restored, the queue is automatically flushed.
+ * - Items that continue to fail after max retries are permanently discarded.
  */
 export class SyncEngine {
   private queue: QueuedItem[] = [];
@@ -34,6 +47,10 @@ export class SyncEngine {
   private readonly MAX_QUEUE_SIZE = 200;           // max buffered items
   private readonly ITEM_DELAY_MS = 200;            // delay between items
 
+  /**
+   * Creates a new SyncEngine instance.
+   * @param options Configuration options including extension context and API client.
+   */
   constructor(options: {
     context: vscode.ExtensionContext;
     apiClient: any;
@@ -117,6 +134,8 @@ export class SyncEngine {
     if (!this.isOnline) return;
 
     this.isFlushing = true;
+    const successfulIds = new Set<string>();
+    const failedPermanentlyIds = new Set<string>();
 
     try {
       // Take first CHUNK_SIZE items only
@@ -125,16 +144,13 @@ export class SyncEngine {
       for (const item of chunk) {
         try {
           await this.apiClient.post(item.endpoint, item.payload);
-
-          // Remove on success
-          this.queue = this.queue.filter(q => q.id !== item.id);
-
+          successfulIds.add(item.id);
         } catch (err: any) {
           item.retries++;
 
           // Drop permanently after max retries
           if (item.retries >= this.MAX_RETRIES) {
-            this.queue = this.queue.filter(q => q.id !== item.id);
+            failedPermanentlyIds.add(item.id);
           }
 
           // Network error — go offline, stop sending
@@ -147,6 +163,13 @@ export class SyncEngine {
         // Small delay between each item
         // Prevents hammering the backend
         await sleep(this.ITEM_DELAY_MS);
+      }
+
+      // Single pass filtering for efficiency
+      if (successfulIds.size > 0 || failedPermanentlyIds.size > 0) {
+        this.queue = this.queue.filter(
+          q => !successfulIds.has(q.id) && !failedPermanentlyIds.has(q.id)
+        );
       }
 
     } finally {
