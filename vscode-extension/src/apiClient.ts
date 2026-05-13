@@ -65,6 +65,7 @@ function httpRequest(url: string, options: {
         path: parsedUrl.pathname + parsedUrl.search,
         method: options.method,
         headers: options.headers,
+        timeout: 15_000, // 15s timeout
       },
       (res) => {
         let data = '';
@@ -76,6 +77,10 @@ function httpRequest(url: string, options: {
     );
 
     req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('Request timed out after 15s'));
+    });
 
     if (options.body) {
       req.write(options.body);
@@ -224,7 +229,19 @@ async function request<T>(path: string, body?: object): Promise<T> {
 
 /**
  * Client for interacting with the ContextLens backend API.
- * All requests are authenticated via Firebase ID tokens.
+ * 
+ * Static method usage:
+ * All methods are static to ensure a consistent, stateless interface throughout the extension.
+ * 
+ * Authentication Flow:
+ * 1. Requests pull the current Firebase ID token from `AuthManager`.
+ * 2. If the request fails with 401 (Unauthorized), the client attempts to refresh the token.
+ * 3. If refresh succeeds, the original request is retried exactly once.
+ * 4. If refresh fails or second attempt is 401, the user is notified of session expiry.
+ * 
+ * Custom Token Exchange:
+ * The backend issues "Custom Tokens" which are exchanged for "ID Tokens" via the Firebase 
+ * Identity Toolkit REST API. This exchange happens once during the sign-in flow.
  */
 export class ApiClient {
   /**
