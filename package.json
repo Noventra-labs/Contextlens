@@ -2,6 +2,16 @@
   "name": "contextlens-backend",
   "version": "0.1.0",
   "private": true,
+  "description": "The backend and monorepo root for ContextLens - AI-driven coding context and insights.",
+  "author": "89Aman",
+  "keywords": [
+    "ai",
+    "context",
+    "developer-tools",
+    "vscode-extension",
+    "gemini",
+    "coding-insights"
+  ],
   "main": "src/index.js",
   "engines": {
     "node": "20"
