@@ -8,7 +8,7 @@ This document tracks the 50 contributions made to the ContextLens project to imp
 - [x] 1. Update `ContextLens_Build_Spec.txt` with detailed workflow explanations.
 - [x] 2. Add JSDoc comments to `episodeStore.ts`.
 - [x] 3. Add JSDoc comments to `syncEngine.ts`.
-- [ ] 4. Add JSDoc comments to `apiClient.ts`.
+- [x] 4. Add JSDoc comments to `apiClient.ts`.
 - [ ] 5. Update `vscode-extension/README.md` with setup instructions.
 - [ ] 6. Update `contextlens-dashboard/README.md` with setup instructions.
 - [ ] 7. Improve `CONTRIBUTING.md`.
@@ -21,9 +21,9 @@ This document tracks the 50 contributions made to the ContextLens project to imp
 - [ ] 12. Ensure consistent error handling in `apiClient.ts`.
 - [ ] 13. Implement a proper logger utility in the extension.
 - [ ] 14. Add type definitions for all API responses.
-- [ ] 15. Use `async/await` consistently in `episodeStore.ts`.
+- [x] 15. Use `async/await` consistently in `episodeStore.ts` and add validation.
 - [ ] 16. Improve `gitContext.ts` robustness.
-- [ ] 17. Optimize `syncEngine.ts` interval and flush logic.
+- [x] 17. Optimize `syncEngine.ts` interval and flush logic.
 - [ ] 18. Clean up unused imports across the extension.
 - [ ] 19. Clean up unused imports across the dashboard.
 - [ ] 20. Implement a standard response wrapper in the backend.
@@ -61,5 +61,5 @@ This document tracks the 50 contributions made to the ContextLens project to imp
 - [ ] 46. Implement "Secret Redaction" before upload.
 - [ ] 47. Implement "Intent Labeling".
 - [ ] 48. Add "Copy-as-Markdown PR summary" feature.
-- [ ] 49. Implement "Keyboard Shortcuts" for extension.
+- [x] 49. Implement "Keyboard Shortcuts" for extension.
 - [ ] 50. Add "Git Commit Linking".
