@@ -1,25 +1,63 @@
-# ContextLens Dashboard
+# ContextLens Web Dashboard
 
-Vite + React + TypeScript dashboard for ContextLens.
+The ContextLens Web Dashboard is a premium, real-time interface for visualizing coding activity, managing projects, and generating AI-driven insights from your development workflow.
+
+## Features
+
+- **Project Timeline**: Visualize coding episodes across branches and time.
+- **Episode Deep-Dive**: See the specific diffs, files, and AI interactions for any given task.
+- **AI Summary Generator**: Generate Pull Request descriptions and high-level branch summaries.
+- **Interactive Diffs**: Review code changes with AI-enhanced explanations and risk assessments.
+- **Real-time Sync**: Automatically updates as you work in VS Code.
+- **Modern UI**: Built with React, Tailwind CSS, and a premium design system.
 
 ## Setup
 
+### Prerequisites
+
+- Node.js v18+
+- Firebase Project
+
+### Installation
+
 ```bash
+cd contextlens-dashboard
 npm install
-cp .env.example .env   # fill in Firebase values
-npm run dev            # local dev on :5173
 ```
+
+### Configuration
+
+Copy the example environment file and fill in your Firebase credentials:
+
+```bash
+cp .env.example .env.local
+```
+
+### Local Development
+
+```bash
+npm run dev
+```
+
+The dashboard will be available at [http://localhost:5173](http://localhost:5173).
 
 ## Build & Deploy
 
+### Building for Production
+
 ```bash
 npm run build
+```
+
+### Deploying to Firebase Hosting
+
+From the root of the repository:
+
+```bash
 firebase deploy --only hosting
 ```
 
 ## Environment Variables
-
-See `.env.example`. All variables start with `VITE_`.
 
 | Variable | Description |
 |---|---|
@@ -31,16 +69,7 @@ See `.env.example`. All variables start with `VITE_`.
 | `VITE_FIREBASE_APP_ID` | From Firebase console |
 | `VITE_API_BASE_URL` | Deployed backend Cloud Functions URL |
 
-## Firebase Hosting
+## License
 
-Ensure `firebase.json` at project root has:
+MIT
 
-```json
-{
-  "hosting": {
-    "public": "contextlens-dashboard/dist",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "rewrites": [{ "source": "**", "destination": "/index.html" }]
-  }
-}
-```
