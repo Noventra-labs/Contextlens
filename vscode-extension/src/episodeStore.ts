@@ -4,12 +4,21 @@ import { GitContext } from './gitContext';
 import { getAuthManager } from './auth';
 import { SyncEngine } from './syncEngine';
 
+/**
+ * Represents a single development episode or task tracked by ContextLens.
+ */
 export interface Episode {
+  /** Unique identifier for the episode (can be a temporary ID before sync). */
   id: string;
+  /** Human-readable label for the task. */
   name: string;
+  /** Number of AI calls logged during this episode. */
   callCount: number;
+  /** List of file paths modified during this episode. */
   changedFiles: string[];
+  /** Optional notes or metadata associated with the episode. */
   note: string;
+  /** The branch this episode is associated with. */
   branchName: string;
 }
 
@@ -45,6 +54,9 @@ export class EpisodeStore {
     }
   }
 
+  /**
+   * Returns the singleton instance of EpisodeStore.
+   */
   static get(): EpisodeStore {
     return EpisodeStore.instance;
   }
@@ -69,22 +81,37 @@ export class EpisodeStore {
 
   // ── Getters ────────────────────────────────────────────────────────────────
 
+  /**
+   * Returns the currently active development episode, or null if none.
+   */
   public getActiveEpisode(): Episode | null {
     return this.activeEpisode;
   }
 
+  /**
+   * Returns the resolved project ID for the current workspace.
+   */
   public getProjectId(): string | null {
     return this.projectId;
   }
 
+  /**
+   * Returns the display name of the current project.
+   */
   public getProjectName(): string | null {
     return this.projectName;
   }
 
+  /**
+   * Returns the current synchronization status from the SyncEngine.
+   */
   public getSyncStatus() {
     return this.syncEngine?.getStatus() ?? { pending: 0, isOnline: false };
   }
 
+  /**
+   * Manually triggers a flush of all pending operations in the SyncEngine.
+   */
   public async forceSync(): Promise<void> {
     await this.syncEngine?.forceFlush();
   }
@@ -296,6 +323,9 @@ export class EpisodeStore {
     this.incrementCallCount();
   }
 
+  /**
+   * Increments the call counter for the active episode and persists the state.
+   */
   public incrementCallCount() {
     if (this.activeEpisode) {
       this.activeEpisode.callCount += 1;
@@ -303,6 +333,11 @@ export class EpisodeStore {
     }
   }
 
+  /**
+   * Adds a file path to the list of changed files for the current episode.
+   * Prevents duplicates and triggers persistence.
+   * @param filePath Workspace-relative or absolute path.
+   */
   public addChangedFile(filePath: string) {
     if (this.activeEpisode && !this.activeEpisode.changedFiles.includes(filePath)) {
       this.activeEpisode.changedFiles.push(filePath);
@@ -310,6 +345,10 @@ export class EpisodeStore {
     }
   }
 
+  /**
+   * Updates the note or metadata for the active episode.
+   * @param note The new note string.
+   */
   public updateNote(note: string) {
     if (this.activeEpisode) {
       this.activeEpisode.note = note;
