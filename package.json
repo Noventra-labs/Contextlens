@@ -12,6 +12,15 @@
     "gemini",
     "coding-insights"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/89Aman/Contextlens.git"
+  },
+  "bugs": {
+    "url": "https://github.com/89Aman/Contextlens/issues"
+  },
+  "homepage": "https://github.com/89Aman/Contextlens#readme",
+  "license": "MIT",
   "main": "src/index.js",
   "engines": {
     "node": "20"
