@@ -36,6 +36,10 @@ export class AuthManager implements vscode.UriHandler {
 
   // ── URI Handler ────────────────────────────────────────────────────────────
 
+  /**
+   * Registers this instance as a global URI handler with VS Code.
+   * This is necessary for receiving the sign-in callback from the browser.
+   */
   registerUriHandler(): void {
     this.context.subscriptions.push(
       vscode.window.registerUriHandler(this)
@@ -86,6 +90,11 @@ export class AuthManager implements vscode.UriHandler {
 
   // ── Sign In / Out ──────────────────────────────────────────────────────────
 
+  /**
+   * Initiates the sign-in flow by opening the backend login URL in the default browser.
+   * 
+   * @returns A promise that resolves with the UID and ID token once sign-in is complete.
+   */
   async signIn(): Promise<{ uid: string; token: string }> {
     const callbackUriStr = `${vscode.env.uriScheme}://${EXTENSION_ID}`;
     const loginUrl = `${API_BASE}/auth/login?callback=${encodeURIComponent(callbackUriStr)}`;
@@ -97,6 +106,12 @@ export class AuthManager implements vscode.UriHandler {
     });
   }
 
+  /**
+   * Ensures the user is signed in. If cached credentials exist, they are returned.
+   * Otherwise, the interactive sign-in flow is triggered.
+   * 
+   * @returns A promise resolving to the authenticated user's metadata.
+   */
   async ensureSignedIn(): Promise<{ uid: string; token: string }> {
     const existing = await this.loadAuthState();
     if (existing) {
@@ -105,6 +120,9 @@ export class AuthManager implements vscode.UriHandler {
     return this.signIn();
   }
 
+  /**
+   * Signs the user out by deleting all stored secrets and notifying listeners.
+   */
   async signOut(): Promise<void> {
     await this.context.secrets.delete(SECRET_ID_TOKEN_KEY);
     await this.context.secrets.delete(SECRET_REFRESH_TOKEN_KEY);
@@ -116,6 +134,11 @@ export class AuthManager implements vscode.UriHandler {
 
   // ── Getters ────────────────────────────────────────────────────────────────
 
+  /**
+   * Loads the current authentication state from VS Code's SecretStorage.
+   * 
+   * @returns The stored UID and ID token, or null if not signed in or using legacy tokens.
+   */
   async loadAuthState(): Promise<{ uid: string; token: string } | null> {
     const idToken = await this.context.secrets.get(SECRET_ID_TOKEN_KEY);
     const uid = await this.context.secrets.get(SECRET_UID_KEY);
@@ -151,6 +174,11 @@ export class AuthManager implements vscode.UriHandler {
     return this.getIdToken();
   }
 
+  /**
+   * Retrieves the current user's UID from SecretStorage.
+   * 
+   * @returns The UID string or undefined if not found.
+   */
   async getUid(): Promise<string | undefined> {
     return this.context.secrets.get(SECRET_UID_KEY);
   }
