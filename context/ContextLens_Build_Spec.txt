@@ -40,7 +40,7 @@ A sidebar state panel is straightforward in VS Code because the platform explici
 
 | Feature | User value | MVP spec | Stretch spec |
 |---|---|---|---|
-| Episode management | Organizes work into task-sized chunks | Create episode, rename episode, close episode, switch active episode | Auto-suggest episode names from branch + prompt |
+| Episode management | Organizes work into task-sized chunks | Auto-create episode on branch switch, rename episode, close episode, persistent task tracking | AI-suggested episode summaries based on code changes |
 | AI chat logging | Preserves AI decisions | Built-in Gemini chat panel; every request logs metadata | Log external AI calls from pasted prompt/response |
 | Git context capture | Anchors AI output to real code state | Capture branch, active file, diff snapshot at request time | Capture changed file list and commit hashes |
 | Intent tagging | Makes timeline readable | Optional short intent field before/after each call | Auto-classify intent from prompt |
@@ -56,10 +56,10 @@ A sidebar state panel is straightforward in VS Code because the platform explici
 | Surface | What it shows | Actions |
 |---|---|---|
 | Activity bar icon | ContextLens entry point | Open sidebar |
-| Sidebar panel 1: State Header | Active episode, branch, call count, AI-owned files, manual notes | New episode, close episode, open dashboard, explain current diff |
+| Sidebar panel 1: State Header | Active episode (branch-linked), call count, AI-owned files, sync status | Rename episode, close episode, open dashboard, explain current diff |
 | Sidebar panel 2: Gemini Chat | Prompt box, recent thread, intent tag field | Send prompt, retry, save note |
-| Status bar | `ContextLens: {episode} · {n} calls` | Click to focus panel |
-| Command palette | Power-user control | New Episode, Close Episode, Explain Diff, Summarize Branch, Open Dashboard |
+| Status bar | `ContextLens: {episode} · {n} calls (Syncing...)` | Click to focus panel |
+| Command palette | Power-user control | Rename Episode, Close Episode, Explain Diff, Summarize Branch, Force Sync |
 
 ### Dashboard screens
 
@@ -73,17 +73,17 @@ A sidebar state panel is straightforward in VS Code because the platform explici
 
 ### User flows
 
-#### 1) New episode flow
-1. Developer clicks `New Episode`.
-2. Enters label, for example `Refactor auth middleware`.
-3. Extension stores active episode locally and starts routing all new calls into it.
+#### 1) Autonomous episode flow
+1. Extension detects current git branch on activation or switch.
+2. `EpisodeStore` automatically resolves the episode ID for that branch or creates a new one.
+3. `SyncEngine` starts the background interval for telemetry flushing.
 
 #### 2) AI request flow
 1. Developer opens chat in the sidebar.
 2. Types prompt and optional intent tag.
 3. Extension captures current branch, active file, and diff snapshot.
-4. Backend logs the call, sends it to Gemini, stores the response, and returns output.
-5. State header increments call count immediately.
+4. Call is pushed to the `SyncEngine` buffer.
+5. `SyncEngine` flushes the log to the backend asynchronously; state header updates call count.
 
 #### 3) Explain diff flow
 1. Developer opens an episode or current state.
@@ -108,7 +108,7 @@ Firebase AI Logic supports multimodal prompting, multi-turn chat, structured out
 
 | Layer | Tech | Responsibility |
 |---|---|---|
-| IDE client | VS Code extension, TypeScript | Capture context, render sidebar/webview, send requests |
+| IDE client | VS Code extension, TypeScript | Autonomous Watchers, SyncEngine (Buffer), Sidebar/Webview |
 | Web app | Next.js + Firebase Hosting | Timeline, search, episode detail, branch summary |
 | Auth | Firebase Auth | Sign-in with Google |
 | Database | Firestore | Projects, episodes, calls, summaries, settings |
@@ -141,7 +141,9 @@ contextlens/
 |---|---|
 | `extension.ts` | Activation, command registration, lifecycle |
 | `auth.ts` | Sign-in, token retrieval, session persistence |
-| `episodeStore.ts` | Active episode state, local caching |
+| `episodeStore.ts` | Branch-bound episode state, resolution, creation |
+| `syncEngine.ts` | FIFO buffer, background flush (30s), retry logic |
+| `watchers.ts` | .git/HEAD (branch), .git/COMMIT_EDITMSG (commit), File Save hooks |
 | `gitContext.ts` | Branch detection, diff capture, file list |
 | `chatViewProvider.ts` | Webview chat UI |
 | `stateTreeProvider.ts` | Sidebar tree view |
@@ -246,7 +248,9 @@ users/{uid}/projects/{projectId}/episodes/{episodeId}/calls/{callId}
 | Key | Type | Purpose |
 |---|---|---|
 | `activeProjectId` | string | Current repo mapping |
-| `activeEpisodeId` | string | Current task context |
+| `activeEpisodeId` | string | Current task context (branch-linked) |
+| `syncBuffer` | array | FIFO queue for unsynced logs |
+| `syncStatus` | enum | idle | syncing | error |
 | `authSession` | secure token/session data | Auth reuse |
 | `draftIntent` | string | Optional convenience field |
 | `lastDiffHash` | string | De-duplicate repeated logs |
@@ -458,6 +462,50 @@ Firestore best-practice guidance emphasizes rules and data-model planning up fro
 - 6–8 polished screenshots
 - Pitch copy: problem, solution, why now, Google stack, roadmap
 
+### Component and Workflow Details
+
+#### 1. Authentication & Session Flow
+The system uses a secure VS Code → Browser → Backend → VS Code loop to manage Firebase credentials without embedding client-side SDKs in the extension.
+- **Trigger**: `AuthManager.signIn()` generates a redirect URI using `vscode.env.uriScheme` (e.g., `vscode://noventra-Labs.contextlens`).
+- **Browser Hand-off**: Opens `${API_BASE}/auth/login` in the user's default browser.
+- **Backend Role**: Handles OAuth with Firebase Auth (Google/GitHub). On success, it generates a **Firebase Custom Token**.
+- **URI Callback**: Redirects the browser to the VS Code URI handler with `uid` and `token` (custom token).
+- **Token Exchange**: `AuthManager` receives the custom token and calls the Google Identity Toolkit API (via the backend proxy) to exchange it for a **Firebase ID Token** and **Refresh Token**.
+- **Storage**: Tokens are stored in `vscode.ExtensionContext.secrets`.
+- **API Security**: `ApiClient` uses an Axios interceptor to inject `Authorization: Bearer <ID_TOKEN>` into every request.
+- **Persistence**: `AuthManager.tryRefreshToken()` handles automatic 401 recovery using the stored refresh token.
+
+#### 2. Project Auto-Resolution
+ContextLens aims for zero-config setup by deriving project identity from the workspace environment.
+- **Git Context**: `EpisodeStore.ensureProject()` triggers `GitContext.getContext()` to check for `.git`.
+- **Remote Mapping**: Runs `git remote get-url origin` to identify the repository URL.
+- **Backend Upsert**: Sends `folderName` and `repoUrl` to `/projects/create`. The backend uses the `repoUrl` as a unique key (or fallback to folder name) to ensure the same project is used across different machines.
+- **Local Cache**: The resulting `projectId` is saved in `workspaceState` for instant resolution on subsequent activations.
+
+#### 3. Data Capture & SyncEngine
+The extension uses a "Fire and Forget" architecture to ensure IDE performance isn't degraded by network latency.
+- **Watchers**: 
+    - **Branch Watcher**: Polls/watches `.git/HEAD` for branch switches.
+    - **Save Watcher**: Captures file paths on `onDidSaveTextDocument`.
+- **SyncEngine Durability**: 
+    - Every `enqueue()` call immediately writes to `cl_queue.json` in the extension's global storage.
+    - Even if VS Code is killed, pending logs are reloaded and flushed on next start.
+- **Flush Strategy**: A background interval (default 30s) flushes the queue in batches of 5.
+- **Temp-ID Reconciliation**: `autoCreateEpisode` generates a `temp-TIMESTAMP` ID. The `SyncEngine` sends this to the backend, which maps the temporary ID to a persistent Firestore ID, allowing subsequent `call` logs to link correctly even before the episode creation is fully confirmed.
+
+#### 4. CLI Tooling (`contextlens-cli.js`)
+The CLI provides a terminal-native way to interact with the ContextLens ecosystem.
+- **Initialization**: `init` creates a `.contextlens/` directory and a `config.json` file. It automatically adds the directory to `.gitignore`.
+- **Configuration**: `config [key] [value]` manages local settings like `api_url` or `project_id`.
+- **Sync Stub**: Designed to mirror the extension's `SyncEngine`, allowing developers to log terminal sessions or CI/CD events into the same episode timeline.
+
+#### 5. AI Interaction (Firebase AI Logic)
+- **Explain Diff**: Triggered via command palette or sidebar. It sends the current diff and episode context to the backend. The backend proxies to Gemini with a "Senior Reviewer" system prompt, returning a structured JSON object.
+- **Chat Webview**: A React-based webview in the sidebar provides the chat interface. It communicates with the extension via `postMessage`, which then routes calls through the `SyncEngine` for logging.
+- **Branch Summarization**: Performed on the Dashboard. It aggregates all episodes in a branch and generates a PR-ready narrative.
+
+---
+
 ### Premium polish that is cheap to build
 
 - Nice branch and file badges
@@ -467,3 +515,8 @@ Firestore best-practice guidance emphasizes rules and data-model planning up fro
 - Copy buttons for summaries
 - Command palette shortcuts
 - “AI-owned files” vs “You-owned files” visual split
+
+#### 6. Dashboard Authentication & State
+- **Account Linking**: The dashboard handles cases where a user might sign in with Google but later tries GitHub with the same email. It uses `fetchSignInMethodsForEmail` and `linkWithCredential` to consolidate identities into a single UID, ensuring the VS Code extension's token remains valid regardless of the provider used in the dashboard.
+- **Reactive State**: Uses Firebase Auth listeners to protect routes and a central `AuthContext` to provide the current user and ID tokens to the API layer.
+- **Project Scope**: All data fetching on the dashboard is scoped to the `auth.currentUser.uid`, enforcing multi-tenancy at the frontend layer before hitting Firestore security rules.
