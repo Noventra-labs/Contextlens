@@ -87,17 +87,33 @@ router.post('/episodes/create', async (req, res) => {
 router.post('/calls/log', async (req, res) => {
   const { uid } = req.user;
   const payload = req.body;
-  const { projectId, episodeId, promptText, modelName } = payload;
+  const { projectId, episodeId, promptText, modelName, source, modelResponse } = payload;
   if (!projectId || !episodeId || !promptText) return res.status(400).json(typedError('invalid', 'Missing required fields'));
+  
+  const skipAI = (source === 'git_commit' || source === 'manual_log');
   const started = Date.now();
+  
   try {
-    const aiResp = await callGemini(promptText, modelName || 'gemini');
+    let aiResp;
+    if (skipAI) {
+      // For git commits or manually logged external calls, we don't call Gemini
+      aiResp = {
+        text: modelResponse || '',
+        model: modelName || (source === 'git_commit' ? 'git' : 'external'),
+        tokens: null
+      };
+    } else {
+      // Native AI chat call
+      aiResp = await callGemini(promptText, modelName || 'gemini');
+    }
+    
     const latencyMs = Date.now() - started;
     const callId = randomUUID();
     const callRef = db.collection('users').doc(uid).collection('projects').doc(projectId).collection('episodes').doc(episodeId).collection('calls').doc(callId);
+    
     const callDoc = {
       createdAt: new Date(),
-      source: payload.source || 'extension',
+      source: source || 'extension',
       intentTag: payload.intentTag || null,
       promptText: redactText(promptText),
       modelName: aiResp.model,
@@ -108,10 +124,11 @@ router.post('/calls/log', async (req, res) => {
       diffSnapshot: redactDeep(payload.diffSnapshot || null),
       diffHash: payload.diffHash || null,
       todoMatches: redactDeep(payload.todoMatches || []),
-      latencyMs,
+      latencyMs: skipAI ? 0 : latencyMs,
       tokenUsage: aiResp.tokens || null,
       status: 'success'
     };
+    
     await callRef.set(callDoc);
 
     // increment episode callCount (retry-safe transaction)
@@ -123,7 +140,7 @@ router.post('/calls/log', async (req, res) => {
       t.update(epRef, { callCount: prev + 1 });
     });
 
-    return res.json({ callId, modelName: aiResp.model, modelResponse: aiResp.text, latencyMs, saved: true });
+    return res.json({ callId, modelName: aiResp.model, modelResponse: aiResp.text, latencyMs: skipAI ? 0 : latencyMs, saved: true });
   } catch (err) {
     const mapped = mapError(err);
     const code = err.message === 'episode_not_found' ? 'invalid_episode' : mapped.code;
