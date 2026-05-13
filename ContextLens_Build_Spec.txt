@@ -96,3 +96,23 @@ ContextLens uses Gemini 1.5 Pro with a temperature of `0.2` for deterministic su
 - **Offline First**: All telemetry from the extension must pass through the `SyncEngine`.
 - **Zero Friction**: Prefer automatic event detection (watchers) over manual logging where possible.
 - **Context Rich**: Always include git diffs and file paths in AI logs to improve downstream analysis.
+
+## 6. Utilities & Tooling
+
+### A. ContextLens CLI (`/contextlens-cli.js`)
+The project includes a standalone Node.js CLI tool for manual operations and project maintenance.
+- **`init`**: Bootstraps the ContextLens directory structure in a new workspace.
+- **`sync`**: Manually triggers the `SyncEngine` to push local memento data to Firestore.
+- **`config`**: Manually set `firebaseProject` or `syncInterval` tokens.
+- **`status`**: Validates the project setup and reports version info.
+
+### B. Migration Scripts (`/migrate-demo-to-real.js`)
+A utility script used during the transition from the "Demo" anonymous environment to the "Real" authenticated environment.
+- Performs recursive copying of `projects`, `episodes`, and `calls` sub-collections.
+- Maps `DEMO_UID` documents to `REAL_UID` destinations while preserving document IDs for link integrity.
+
+## 7. Development Guidelines
+- **Offline First**: All telemetry from the extension must pass through the `SyncEngine`.
+- **Zero Friction**: Prefer automatic event detection (watchers) over manual logging where possible.
+- **Context Rich**: Always include git diffs and file paths in AI logs to improve downstream analysis.
+- **Atomic Commits**: Follow conventional commits (feat, fix, docs, refactor) to maintain a clean history for Gemini analysis.
