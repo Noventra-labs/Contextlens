@@ -122,7 +122,16 @@ router.post('/calls/log', async (req, res) => {
   }
 });
 
-// Explain accumulated diff for an episode
+/**
+ * POST /episodes/explain
+ * Generates an AI explanation of the diff accumulated in an episode.
+ * 
+ * @param {express.Request} req - The request object.
+ * @param {string} req.body.projectId - The project ID.
+ * @param {string} req.body.episodeId - The episode ID.
+ * @param {string} req.body.diffHash - The hash of the diff to explain.
+ * @param {express.Response} res - The response object.
+ */
 router.post('/episodes/explain', async (req, res) => {
   const { uid } = req.user;
   const { projectId, episodeId, diffHash, changedFiles } = req.body;
@@ -150,6 +159,16 @@ router.post('/episodes/explain', async (req, res) => {
   }
 });
 
+/**
+ * POST /branches/summarize
+ * Summarizes the activity across multiple episodes on a branch.
+ * 
+ * @param {express.Request} req - The request object.
+ * @param {string} req.body.projectId - The project ID.
+ * @param {string} req.body.branchName - The name of the branch.
+ * @param {Array} req.body.episodes - The list of episodes to summarize.
+ * @param {express.Response} res - The response object.
+ */
 router.post('/branches/summarize', async (req, res) => {
   const { uid } = req.user;
   const { projectId, branchName, episodes } = req.body;
