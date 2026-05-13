@@ -16,6 +16,15 @@ function structuredOrFallback(response, fallback) {
   }
 }
 
+/**
+ * POST /projects/create
+ * Creates a new project for the authenticated user.
+ * 
+ * @param {express.Request} req - The request object.
+ * @param {string} req.body.name - The project name.
+ * @param {string} [req.body.repoUrl] - The repository URL.
+ * @param {express.Response} res - The response object.
+ */
 router.post('/projects/create', async (req, res) => {
   const { uid } = req.user;
   const { name, repoUrl, localWorkspaceName, defaultBranch, settings } = req.body;
@@ -32,6 +41,15 @@ router.post('/projects/create', async (req, res) => {
   }
 });
 
+/**
+ * POST /episodes/create
+ * Creates a new coding episode within a project.
+ * 
+ * @param {express.Request} req - The request object.
+ * @param {string} req.body.projectId - The project ID.
+ * @param {string} req.body.branchName - The name of the current branch.
+ * @param {express.Response} res - The response object.
+ */
 router.post('/episodes/create', async (req, res) => {
   const { uid } = req.user;
   const { projectId, label, branchName } = req.body;
