@@ -7,6 +7,13 @@ const location = process.env.VERTEX_LOCATION || 'us-central1';
 const useVertex = (process.env.USE_VERTEX || 'true').toLowerCase() === 'true';
 const modelCache = new Map();
 
+/**
+ * Retrieves or initializes a Vertex AI generative model instance.
+ * 
+ * @param {string} [modelName] - The name of the model (e.g., 'gemini-1.5-pro').
+ * @returns {import('@google-cloud/vertexai').GenerativeModel|null} The model instance or null if Vertex AI is disabled.
+ * @throws {Error} If GCP_PROJECT is missing when Vertex AI is enabled.
+ */
 function getVertexModel(modelName) {
   if (!useVertex) return null;
   if (!project) throw new Error('GCP_PROJECT is required for Vertex AI');
@@ -19,6 +26,12 @@ function getVertexModel(modelName) {
   return model;
 }
 
+/**
+ * Safely parses JSON from a string, with a fallback to regex if parsing fails.
+ * 
+ * @param {string} text - The text to parse.
+ * @returns {Object|null} The parsed JSON or null if invalid.
+ */
 function safeJsonParse(text) {
   try {
     return JSON.parse(text);
@@ -29,6 +42,12 @@ function safeJsonParse(text) {
   }
 }
 
+/**
+ * Creates a promise that rejects after a specified timeout.
+ * 
+ * @param {number} timeoutMs - Timeout in milliseconds.
+ * @returns {Object} An object containing the promise and the timer ID.
+ */
 function createTimeoutPromise(timeoutMs) {
   let timer;
   const promise = new Promise((_, reject) => {
@@ -37,6 +56,15 @@ function createTimeoutPromise(timeoutMs) {
   return { promise, timer };
 }
 
+/**
+ * Executes a Vertex AI content generation with retries for transient errors.
+ * 
+ * @param {import('@google-cloud/vertexai').GenerativeModel} model - The model instance.
+ * @param {Array} contents - The prompt contents.
+ * @param {Object} generationConfig - Configuration for generation.
+ * @returns {Promise<Object>} The model response.
+ * @throws {Error} If all attempts fail.
+ */
 async function generateWithRetry(model, contents, generationConfig) {
   const maxAttempts = Number(process.env.VERTEX_RETRY_ATTEMPTS || 2);
   let lastError;
@@ -57,6 +85,14 @@ async function generateWithRetry(model, contents, generationConfig) {
   throw lastError;
 }
 
+/**
+ * Calls the Gemini model (via Vertex AI) with a standardized interface.
+ * 
+ * @param {string} prompt - The user prompt.
+ * @param {string} [modelName] - The model to use.
+ * @param {Object} [options] - Generation options (temperature, etc.).
+ * @returns {Promise<Object>} The result object containing the generated text and metadata.
+ */
 async function callGemini(prompt, modelName = 'gemini-1.5-pro', options = {}) {
   const sanitizedPrompt = redactText(prompt);
   const timeoutMs = Number(process.env.VERTEX_TIMEOUT_MS || 30000);
