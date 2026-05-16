@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react'
 import {
   onAuthStateChanged,
   signInWithPopup,
@@ -37,33 +37,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsub()
   }, [])
 
-  const signInWithGoogle = async () => {
+  const signInWithGoogle = useCallback(async () => {
     const provider = new GoogleAuthProvider()
     return await signInWithPopup(auth, provider)
-  }
+  }, [])
 
-  const signInWithGithub = async () => {
+  const signInWithGithub = useCallback(async () => {
     const provider = new GithubAuthProvider()
     return await signInWithPopup(auth, provider)
-  }
+  }, [])
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     await firebaseSignOut(auth)
-  }
+  }, [])
 
-  const fetchProviders = async (email: string) => {
+  const fetchProviders = useCallback(async (email: string) => {
     return await fetchSignInMethodsForEmail(auth, email)
-  }
+  }, [])
 
-  const linkAccount = async (credential: AuthCredential) => {
+  const linkAccount = useCallback(async (credential: AuthCredential) => {
     if (!auth.currentUser) throw new Error('No user signed in to link account to')
     await linkWithCredential(auth.currentUser, credential)
-  }
+  }, [])
+
+  // Memoize value to prevent unnecessary re-renders of all auth consumers
+  const value = useMemo(
+    () => ({ user, loading, signInWithGoogle, signInWithGithub, signOut, fetchProviders, linkAccount }),
+    [user, loading, signInWithGoogle, signInWithGithub, signOut, fetchProviders, linkAccount]
+  )
 
   return (
-    <AuthContext.Provider
-      value={{ user, loading, signInWithGoogle, signInWithGithub, signOut, fetchProviders, linkAccount }}
-    >
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   )
