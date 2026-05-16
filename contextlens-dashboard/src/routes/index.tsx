@@ -12,6 +12,7 @@ const ProjectPage = lazy(() => import('../pages/ProjectPage').then(m => ({ defau
 const EpisodeDetailPage = lazy(() => import('../pages/EpisodeDetailPage').then(m => ({ default: m.EpisodeDetailPage })))
 const BranchPage = lazy(() => import('../pages/BranchPage').then(m => ({ default: m.BranchPage })))
 const SettingsPage = lazy(() => import('../pages/SettingsPage').then(m => ({ default: m.SettingsPage })))
+const SetupPage = lazy(() => import('../pages/SetupPage').then(m => ({ default: m.SetupPage })))
 const NotFoundPage = lazy(() => import('../pages/NotFoundPage'))
 
 function PageLoader() {
@@ -67,6 +68,10 @@ const router = createBrowserRouter([
           {
             path: 'settings',
             element: <SettingsPage />,
+          },
+          {
+            path: 'setup',
+            element: <SetupPage />,
           },
         ],
       },

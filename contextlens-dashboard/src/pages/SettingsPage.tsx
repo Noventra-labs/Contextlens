@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Code, ExternalLink } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useProjects } from '../lib/firestoreHooks'
 
@@ -55,6 +56,33 @@ export function SettingsPage() {
             >
               Sign Out
             </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Integration section */}
+      <section className="mb-8">
+        <h2 className="text-[11px] font-semibold text-textMuted uppercase tracking-wider mb-3">
+          Integrations
+        </h2>
+        <div className="bg-card border border-cardBorder rounded-lg p-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                <Code className="w-6 h-6" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-textPrimary">VS Code Extension</p>
+                <p className="text-xs text-textMuted">Sync your coding sessions to the cloud</p>
+              </div>
+            </div>
+            <a
+              href={`https://contextlens-backend-001.web.app/api/auth/login?uid=${user?.uid}&callback=vscode://noventra-Labs.contextlens`}
+              className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-black text-sm font-bold hover:opacity-90 transition-opacity"
+            >
+              Connect VS Code
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
           </div>
         </div>
       </section>
