@@ -1,19 +1,26 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
+import { GitBranch, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import { useSearch } from '../context/SearchContext'
 import { useProjects, useEpisodes } from '../lib/firestoreHooks'
+import { useProjectSearch } from '../hooks/useProjectSearch'
 import { EpisodeTimeline } from '../components/episodes/EpisodeTimeline'
 import { SkeletonCard } from '../components/ui/SkeletonCard'
 import { EmptyState } from '../components/ui/EmptyState'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
 import { Badge } from '../components/ui/Badge'
-import type { Episode } from '../types'
-import { search } from '../lib/api'
-import { GitBranch, X } from 'lucide-react'
 
 export function ProjectPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const { user } = useAuth()
+  const { searchQuery, setSearchQuery } = useSearch()
+
+  // Clear search query when switching projects
+  useEffect(() => {
+    setSearchQuery('')
+  }, [projectId, setSearchQuery])
+  
   const { data: projects, loading: projectsLoading, error: projectsError } = useProjects(user?.uid ?? '')
   const {
     data: episodes,
@@ -25,51 +32,46 @@ export function ProjectPage() {
 
   const [branchFilter, setBranchFilter] = useState<string>('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [searchQuery, setSearchQuery] = useState<string>('')
-  const [searchResults, setSearchResults] = useState<Episode[] | null>(null)
-  const [searchLoading, setSearchLoading] = useState(false)
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Unique branches from episodes
-  const branches = Array.from(new Set(episodes.map((e) => e.branchName)))
+  const { searchResults, searchLoading } = useProjectSearch(
+    projectId ?? '',
+    episodes,
+    searchQuery,
+    branchFilter
+  )
 
-  // Debounced search
-  useEffect(() => {
-    if (searchTimer.current) clearTimeout(searchTimer.current)
-    if (!searchQuery.trim()) {
-      setSearchResults(null)
-      return
-    }
-    searchTimer.current = setTimeout(async () => {
-      setSearchLoading(true)
-      try {
-        const results = await search(projectId!, searchQuery, { branchName: branchFilter || undefined })
-        const matchedIds = new Set(results.episodes.map((e) => e.episodeId))
-        setSearchResults(episodes.filter((e) => matchedIds.has(e.id)))
-      } catch {
-        setSearchResults([])
-      } finally {
-        setSearchLoading(false)
-      }
-    }, 300)
-    return () => {
-      if (searchTimer.current) clearTimeout(searchTimer.current)
-    }
-  }, [searchQuery, branchFilter, episodes])
+  const branches = useMemo(
+    () => Array.from(new Set(episodes.map((e) => e.branchName))),
+    [episodes]
+  )
 
   const hasFilters = branchFilter !== '' || statusFilter !== 'all' || searchQuery !== ''
 
-  // Filtered episodes (when not searching)
-  const filteredEpisodes =
-    searchResults !== null
-      ? searchResults
-      : episodes.filter((e) => {
-          if (branchFilter && e.branchName !== branchFilter) return false
-          if (statusFilter !== 'all' && e.status !== statusFilter) return false
-          return true
-        })
+  const filteredEpisodes = useMemo(() => {
+    const base = searchResults !== null ? searchResults : episodes
+    return base.filter((e) => {
+      if (branchFilter && e.branchName !== branchFilter) return false
+      if (statusFilter !== 'all' && e.status !== statusFilter) return false
+      return true
+    })
+  }, [searchResults, episodes, branchFilter, statusFilter])
 
-  const totalCalls = episodes.reduce((sum, e) => sum + e.callCount, 0)
+  const totalCalls = useMemo(
+    () => episodes.reduce((sum, e) => sum + e.callCount, 0),
+    [episodes]
+  )
+
+  const handleClearFilters = () => {
+    setBranchFilter('')
+    setStatusFilter('all')
+    setSearchQuery('')
+  }
+
+  if (projectsError || episodesError) {
+    return <ErrorMessage message={episodesError || projectsError || 'An error occurred'} />
+  }
+
+  const isLoading = episodesLoading || projectsLoading || searchLoading
 
   return (
     <div className="max-w-4xl">
@@ -98,17 +100,6 @@ export function ProjectPage() {
 
       {/* Filter bar */}
       <div className="sticky top-0 z-10 bg-surface py-3 mb-4 flex items-center gap-2 flex-wrap border-b border-cardBorder -mx-6 px-6">
-        {/* Search */}
-        <input
-          type="text"
-          id="episode-search"
-          placeholder="Search episodes..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="flex-1 min-w-48 bg-card border border-cardBorder rounded-md px-3 py-1.5 text-sm text-textPrimary placeholder-textMuted focus:outline-none focus:border-primary/60 transition-colors"
-        />
-
-        {/* Branch filter */}
         <div className="flex items-center gap-1.5">
           <GitBranch className="w-3.5 h-3.5 text-textMuted" />
           <select
@@ -125,7 +116,6 @@ export function ProjectPage() {
           </select>
         </div>
 
-        {/* Status filter */}
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
@@ -136,15 +126,9 @@ export function ProjectPage() {
           <option value="closed">Closed</option>
         </select>
 
-        {/* Clear filters */}
         {hasFilters && (
           <button
-            onClick={() => {
-              setBranchFilter('')
-              setStatusFilter('all')
-              setSearchQuery('')
-              setSearchResults(null)
-            }}
+            onClick={handleClearFilters}
             className="flex items-center gap-1 text-xs text-textMuted hover:text-red-400 transition-colors"
           >
             <X className="w-3.5 h-3.5" />
@@ -152,21 +136,16 @@ export function ProjectPage() {
           </button>
         )}
 
-        {/* Branch pill active indicator */}
-        {branchFilter && (
-          <Badge text={branchFilter} variant="branch" />
-        )}
+        {branchFilter && <Badge text={branchFilter} variant="branch" />}
       </div>
 
       {/* Timeline */}
-      {episodesLoading || projectsLoading || searchLoading ? (
+      {isLoading && !episodes.length ? (
         <div className="space-y-2">
           <SkeletonCard />
           <SkeletonCard />
           <SkeletonCard />
         </div>
-      ) : episodesError || projectsError ? (
-        <ErrorMessage message={episodesError || projectsError || 'An error occurred'} />
       ) : filteredEpisodes.length === 0 ? (
         <EmptyState
           title={hasFilters ? 'No episodes match your filters' : 'No episodes yet'}

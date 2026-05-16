@@ -1,106 +1,73 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore'
-import { db } from '../lib/firebase'
+import { memo, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { FolderOpen, Plus } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
-import { useProjects } from '../lib/firestoreHooks'
-import { Badge } from '../components/ui/Badge'
+import { useSearch } from '../context/SearchContext'
+import { useProjects, useRecentEpisodes } from '../lib/firestoreHooks'
 import { SkeletonCard } from '../components/ui/SkeletonCard'
 import { EmptyState } from '../components/ui/EmptyState'
-import { timeAgo } from '../lib/utils'
-import type { Episode } from '../types'
-import { GitBranch, ExternalLink, Folder } from 'lucide-react'
+import { ProjectCard } from '../components/projects/ProjectCard'
+import { RecentEpisodeItem } from '../components/episodes/RecentEpisodeItem'
 
-interface RecentEpisode extends Episode {
-  projectName: string
-}
-
-export function HomePage() {
+export const HomePage = memo(function HomePage() {
   const { user } = useAuth()
-  const { data: projects, loading: projectsLoading, error: projectsError } = useProjects(user?.uid ?? '')
-  const [recentEpisodes, setRecentEpisodes] = useState<RecentEpisode[]>([])
-  const [episodesLoading, setEpisodesLoading] = useState(true)
-  const [episodesError, setEpisodesError] = useState<string | null>(null)
+  const { searchQuery } = useSearch()
+  const navigate = useNavigate()
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const toDate = (ts: any): Date => ts?.toDate?.() ?? new Date(ts)
+  const {
+    data: projects,
+    loading: projectsLoading,
+    error: projectsError,
+  } = useProjects(user?.uid ?? '')
 
-  useEffect(() => {
-    if (projects.length === 0) {
-      setEpisodesLoading(false)
-      return
-    }
+  const {
+    data: recentEpisodes,
+    loading: episodesLoading,
+    error: episodesError,
+  } = useRecentEpisodes(user?.uid ?? '', 10)
 
-    const fetchAll = async () => {
-      setEpisodesError(null)
-      try {
-        const effectiveUid = user?.uid ?? ''
+  // Memoize filtered projects
+  const filteredProjects = useMemo(
+    () => projects.filter((p) =>
+      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (p.repoUrl && p.repoUrl.toLowerCase().includes(searchQuery.toLowerCase()))
+    ),
+    [projects, searchQuery]
+  )
 
-        // Fetch episodes from all projects in parallel
-        const results = await Promise.allSettled(
-          projects.map(async (project) => {
-            const q = query(
-              collection(db, `users/${effectiveUid}/projects/${project.id}/episodes`),
-              orderBy('startedAt', 'desc'),
-              limit(5),
-            )
-            const snap = await getDocs(q)
-            return snap.docs.map((d) => {
-              const data = d.data()
-              return {
-                id: d.id,
-                projectId: project.id,
-                label: data.label ?? 'Untitled',
-                branchName: data.branchName ?? 'main',
-                status: data.status ?? 'closed',
-                startedAt: toDate(data.startedAt),
-                endedAt: data.endedAt ? toDate(data.endedAt) : null,
-                callCount: data.callCount ?? 0,
-                changedFiles: data.changedFiles ?? [],
-                latestDiffHash: data.latestDiffHash ?? '',
-                manualNotes: data.manualNotes ?? '',
-                episodeSummary: data.episodeSummary ?? null,
-                explainDiffSummary: data.explainDiffSummary ?? null,
-                explainDiffRisks: data.explainDiffRisks ?? [],
-                explainDiffChecks: data.explainDiffChecks ?? [],
-                projectName: project.name,
-              } as RecentEpisode
-            })
-          })
-        )
-
-        const all: RecentEpisode[] = []
-        for (const result of results) {
-          if (result.status === 'fulfilled') {
-            all.push(...result.value)
-          }
-          // Silently skip failed projects — partial data is better than no data
-        }
-
-        all.sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())
-        setRecentEpisodes(all.slice(0, 5))
-      } catch (err: any) {
-        console.error('[ContextLens] Failed to fetch recent episodes:', err)
-        setEpisodesError(err.message)
-      } finally {
-        setEpisodesLoading(false)
-      }
-    }
-
-    fetchAll()
-  }, [user, projects])
+  // Memoize filtered recent episodes
+  const filteredEpisodes = useMemo(
+    () => recentEpisodes.filter((ep) =>
+      ep.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      ep.projectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      ep.branchName.toLowerCase().includes(searchQuery.toLowerCase())
+    ),
+    [recentEpisodes, searchQuery]
+  )
 
   return (
     <div className="max-w-5xl">
-      <h1 className="text-2xl font-bold text-textPrimary mb-6">
-        Welcome back, {user?.displayName?.split(' ')[0] ?? 'Developer'} 👋
-      </h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold text-textPrimary">
+          Welcome back, {user?.displayName?.split(' ')[0] ?? 'Developer'} 👋
+        </h1>
+        <button
+          onClick={() => navigate('/dashboard/setup')}
+          className="flex items-center gap-2 bg-primary hover:bg-primaryLight text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-primary/20"
+        >
+          <Plus className="w-4 h-4" />
+          Connect Project
+        </button>
+      </div>
 
       {/* Projects section */}
       <section className="mb-10">
-        <h2 className="text-[11px] font-semibold text-textMuted uppercase tracking-wider mb-3">
-          Your Projects
-        </h2>
+        <div className="flex items-center gap-2 mb-3">
+          <FolderOpen className="w-4 h-4 text-textMuted" />
+          <h2 className="text-[11px] font-semibold text-textMuted uppercase tracking-wider">
+            Your Projects
+          </h2>
+        </div>
 
         {projectsLoading && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -127,33 +94,8 @@ export function HomePage() {
 
         {!projectsLoading && projects.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {projects.map((project) => (
-              <Link
-                key={project.id}
-                to={`/dashboard/${project.id}`}
-                className="block bg-card border border-cardBorder rounded-lg p-4 hover:border-primary/50 hover:bg-gray-800/20 transition-all group"
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <Folder className="w-4 h-4 text-primary flex-shrink-0" />
-                    <h3 className="text-sm font-semibold text-textPrimary group-hover:text-primary transition-colors">
-                      {project.name}
-                    </h3>
-                  </div>
-                  <ExternalLink className="w-3.5 h-3.5 text-textMuted opacity-0 group-hover:opacity-100 transition-opacity" />
-                </div>
-                {project.repoUrl && (
-                  <p className="text-xs text-textMuted font-mono truncate mb-2">
-                    {project.repoUrl.replace('https://github.com/', '')}
-                  </p>
-                )}
-                <div className="flex items-center gap-2 flex-wrap">
-                  <Badge text={project.defaultBranch} variant="branch" />
-                  <span className="text-xs text-textMuted">
-                    Updated {timeAgo(project.updatedAt)}
-                  </span>
-                </div>
-              </Link>
+            {filteredProjects.map((project) => (
+              <ProjectCard key={project.id} project={project} />
             ))}
           </div>
         )}
@@ -186,31 +128,12 @@ export function HomePage() {
 
         {!episodesLoading && recentEpisodes.length > 0 && (
           <div className="bg-card border border-cardBorder rounded-lg overflow-hidden">
-            {recentEpisodes.map((ep, i) => (
-              <Link
-                key={ep.id}
-                to={`/dashboard/${ep.projectId}/episodes/${ep.id}`}
-                className={`flex items-center gap-3 px-4 py-3 hover:bg-gray-800/20 transition-colors ${
-                  i > 0 ? 'border-t border-cardBorder' : ''
-                }`}
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-textPrimary truncate">{ep.label}</p>
-                  <p className="text-xs text-textMuted">{ep.projectName}</p>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <div className="flex items-center gap-1 text-xs text-textMuted">
-                    <GitBranch className="w-3 h-3" />
-                    <span>{ep.branchName}</span>
-                  </div>
-                  <Badge text={ep.status} variant={ep.status === 'active' ? 'status-active' : 'status-closed'} />
-                  <span className="text-xs text-textMuted">{timeAgo(ep.startedAt)}</span>
-                </div>
-              </Link>
+            {filteredEpisodes.map((ep, i) => (
+              <RecentEpisodeItem key={ep.id} episode={ep} isFirst={i === 0} />
             ))}
           </div>
         )}
       </section>
     </div>
   )
-}
+})

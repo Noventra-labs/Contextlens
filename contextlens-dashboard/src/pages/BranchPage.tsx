@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { GitBranch, Sparkles } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import { useSearch } from '../context/SearchContext'
 import { useEpisodesByBranch } from '../lib/firestoreHooks'
 import { branchSummary } from '../lib/api'
 import { BranchSummaryCard } from '../components/ai/BranchSummaryCard'
@@ -14,6 +15,7 @@ import type { BranchSummaryResult } from '../types'
 export function BranchPage() {
   const { projectId, branchName } = useParams<{ projectId: string; branchName: string }>()
   const { user } = useAuth()
+  const { searchQuery } = useSearch()
 
   const decodedBranch = decodeURIComponent(branchName ?? '')
 
@@ -117,7 +119,10 @@ export function BranchPage() {
           />
         ) : (
           <EpisodeTimeline
-            episodes={episodes}
+            episodes={episodes.filter((ep) =>
+              ep.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
+              ep.branchName.toLowerCase().includes(searchQuery.toLowerCase())
+            )}
             projectId={projectId ?? ''}
             uid={user?.uid ?? ''}
           />
