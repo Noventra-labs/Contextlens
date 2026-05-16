@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Copy, Check } from 'lucide-react'
 import { copyToClipboard } from '../../lib/utils'
+import { useToast } from '../../context/ToastContext'
 
 interface CopyButtonProps {
   text: string
@@ -10,14 +11,16 @@ interface CopyButtonProps {
 
 export function CopyButton({ text, label, className = '' }: CopyButtonProps) {
   const [copied, setCopied] = useState(false)
+  const { addToast } = useToast()
 
   const handleCopy = async () => {
     try {
       await copyToClipboard(text)
       setCopied(true)
+      addToast('Copied to clipboard', 'success', 2000)
       setTimeout(() => setCopied(false), 2000)
     } catch {
-      // silent fail
+      addToast('Failed to copy', 'error')
     }
   }
 
