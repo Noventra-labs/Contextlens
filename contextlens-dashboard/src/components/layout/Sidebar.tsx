@@ -1,10 +1,10 @@
+import { memo, useMemo } from 'react'
 import { Link, useNavigate, useParams, useLocation } from 'react-router-dom'
-import { GitBranch, Settings, LogOut, FolderOpen, Code } from 'lucide-react'
+import { GitBranch, Settings, LogOut, FolderOpen, Plus } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
-import { useProjects } from '../../lib/firestoreHooks'
-import { useEpisodes } from '../../lib/firestoreHooks'
+import { useProjects, useEpisodes } from '../../lib/firestoreHooks'
 
-function BranchList({
+const BranchList = memo(function BranchList({
   uid,
   projectId,
   activeProjectId,
@@ -17,9 +17,15 @@ function BranchList({
   const { branchName: activeBranch } = useParams()
   const location = useLocation()
 
-  const branches = Array.from(new Set(episodes.map((e) => e.branchName)))
-  const branchCounts = Object.fromEntries(
-    branches.map((b) => [b, episodes.filter((e) => e.branchName === b).length]),
+  const branches = useMemo(
+    () => Array.from(new Set(episodes.map((e) => e.branchName))),
+    [episodes]
+  )
+  const branchCounts = useMemo(
+    () => Object.fromEntries(
+      branches.map((b) => [b, episodes.filter((e) => e.branchName === b).length]),
+    ),
+    [branches, episodes]
   )
 
   if (projectId !== activeProjectId) return null
@@ -54,7 +60,7 @@ function BranchList({
       })}
     </div>
   )
-}
+})
 
 export function Sidebar() {
   const { user, signOut } = useAuth()
@@ -94,9 +100,18 @@ export function Sidebar() {
 
       {/* Projects list */}
       <div className="flex-1 overflow-y-auto py-3">
-        <p className="px-4 text-[10px] font-semibold text-textMuted uppercase tracking-wider mb-2">
-          Projects
-        </p>
+        <div className="flex items-center justify-between px-4 mb-2">
+          <p className="text-[10px] font-semibold text-textMuted uppercase tracking-wider">
+            Projects
+          </p>
+          <Link 
+            to="/dashboard/setup" 
+            className="p-1 rounded-md hover:bg-primary/10 text-textMuted hover:text-primary transition-colors"
+            title="Connect Project"
+          >
+            <Plus className="w-3 h-3" />
+          </Link>
+        </div>
         <nav className="space-y-0.5 px-2">
           {projects.length === 0 ? (
             <div className="px-4 py-4 mt-2">
@@ -142,35 +157,7 @@ export function Sidebar() {
       </div>
 
       {/* Bottom user section */}
-      <div className="border-t border-cardBorder p-3 space-y-2">
-        {user && (
-          <div className="flex items-center gap-2 px-1">
-            {user.photoURL ? (
-              <img
-                src={user.photoURL}
-                alt={user.displayName ?? ''}
-                className="w-7 h-7 rounded-full flex-shrink-0"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <div className="w-7 h-7 rounded-full bg-primary/30 flex items-center justify-center text-xs text-primary font-bold flex-shrink-0">
-                {user.displayName?.[0] ?? 'U'}
-              </div>
-            )}
-            <span className="text-xs text-textMuted truncate flex-1">
-              {user.email}
-            </span>
-          </div>
-        )}
-        {user && (
-          <a
-            href={`https://contextlens-backend-001.web.app/api/auth/login?uid=${user.uid}&callback=vscode://noventra-Labs.contextlens`}
-            className="flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-primary hover:bg-primary/10 transition-colors"
-          >
-            <Code className="w-3.5 h-3.5" />
-            Connect VS Code
-          </a>
-        )}
+      <div className="border-t border-cardBorder p-3 space-y-1">
         <div className="flex items-center gap-1">
           <Link
             to="/dashboard/settings"
