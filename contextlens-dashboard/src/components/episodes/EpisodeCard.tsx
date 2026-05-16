@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, memo, useCallback } from 'react'
 import { ChevronDown, ExternalLink } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import type { Episode } from '../../types'
@@ -16,7 +16,7 @@ interface EpisodeCardProps {
   uid: string
 }
 
-export function EpisodeCard({ episode, projectId, uid }: EpisodeCardProps) {
+export const EpisodeCard = memo(function EpisodeCard({ episode, projectId, uid }: EpisodeCardProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [fetchEnabled, setFetchEnabled] = useState(false)
   const navigate = useNavigate()
@@ -28,10 +28,14 @@ export function EpisodeCard({ episode, projectId, uid }: EpisodeCardProps) {
     fetchEnabled,
   )
 
-  const handleToggle = () => {
+  const handleToggle = useCallback(() => {
     if (!isExpanded && !fetchEnabled) setFetchEnabled(true)
     setIsExpanded((p) => !p)
-  }
+  }, [isExpanded, fetchEnabled])
+
+  const handleOpenDetail = useCallback(() => {
+    navigate(`/dashboard/${projectId}/episodes/${episode.id}`)
+  }, [navigate, projectId, episode.id])
 
   const statusVariant = episode.status === 'active' ? 'status-active' : 'status-closed'
 
@@ -116,9 +120,7 @@ export function EpisodeCard({ episode, projectId, uid }: EpisodeCardProps) {
           {/* Open full detail link */}
           <div className="px-4 pb-3">
             <button
-              onClick={() =>
-                navigate(`/dashboard/${projectId}/episodes/${episode.id}`)
-              }
+              onClick={handleOpenDetail}
               className="flex items-center gap-1 text-xs text-primary hover:text-primaryLight transition-colors"
             >
               <ExternalLink className="w-3.5 h-3.5" />
@@ -129,4 +131,4 @@ export function EpisodeCard({ episode, projectId, uid }: EpisodeCardProps) {
       )}
     </div>
   )
-}
+})

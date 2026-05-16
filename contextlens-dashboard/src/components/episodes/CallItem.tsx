@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import { ChevronDown } from 'lucide-react'
 import type { Call } from '../../types'
 import { Badge } from '../ui/Badge'
@@ -9,7 +9,7 @@ interface CallItemProps {
   call: Call
 }
 
-function CollapsibleText({
+const CollapsibleText = memo(function CollapsibleText({
   text,
   label,
 }: {
@@ -43,9 +43,9 @@ function CollapsibleText({
       )}
     </div>
   )
-}
+})
 
-export function CallItem({ call }: CallItemProps) {
+export const CallItem = memo(function CallItem({ call }: CallItemProps) {
   const [isExpanded, setIsExpanded] = useState(false)
 
   const statusColor =
@@ -141,4 +141,4 @@ export function CallItem({ call }: CallItemProps) {
       )}
     </div>
   )
-}
+})
