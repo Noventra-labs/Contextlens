@@ -2,8 +2,11 @@ node_modules
 .claude
 .firebase
 .env
+.gemini
 coverage/
 v2
 *.log
 dist/
 out/
+diary/
+*.md
