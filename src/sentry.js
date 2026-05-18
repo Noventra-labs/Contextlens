@@ -1,9 +1,10 @@
-const Sentry = require("@sentry/node");
+const Sentry = require("@sentry/google-cloud-serverless");
 const { nodeProfilingIntegration } = require("@sentry/profiling-node");
 
 // Initialize Sentry early so it can instrument everything
 Sentry.init({
-  dsn: process.env.SENTRY_DSN,
+  dsn: "https://a962136739b601108e5f6f939e88ccac@o4511412497350656.ingest.de.sentry.io/4511412627570768",
+  sendDefaultPii: true,
   integrations: [
     nodeProfilingIntegration(),
   ],

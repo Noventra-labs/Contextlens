@@ -1,5 +1,5 @@
 require('dotenv').config();
-require('./sentry'); // Must be required before any other module
+const Sentry = require('./sentry'); // Must be required before any other module
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
@@ -316,8 +316,7 @@ app.use((req, res, next) => {
 app.use('/', requireAuth, apiLimiter, api);
 
 // The error handler must be registered before any other error middleware and after all controllers
-require('./sentry').setupExpressErrorHandler(app);
-
+// Sentry google-cloud-serverless wraps the exported function, so we do not use setupExpressErrorHandler here.
 /**
  * Global error handler for the Express application.
  * Logs the error and returns a standardized 500 response.
@@ -334,10 +333,10 @@ app.use((err, req, res, next) => {
  * Firebase Cloud Function (v2) export for the ContextLens API.
  * Configured with 512MiB memory, 300s timeout, and CORS enabled.
  */
-exports.api = onRequest({
+exports.api = Sentry.wrapHttpFunction(onRequest({
   region: 'us-central1',
   memory: '512MiB',
   timeoutSeconds: 300,
   maxInstances: 10,
   cors: true,
-}, app);
+}, app));
