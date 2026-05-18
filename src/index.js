@@ -35,10 +35,6 @@ app.use(bodyParser.json({ limit: '1mb' }));
 // Attach a small health route
 app.get('/_health', (req, res) => res.json({ status: 'ok' }));
 
-app.get('/debug-sentry', (req, res) => {
-  throw new Error('Sentry test error from ContextLens serverless backend!');
-});
-
 // ── Auth routes (public — no auth required) ───────────────────────────────
 const { auth: firebaseAuth } = require('./firebase');
 
