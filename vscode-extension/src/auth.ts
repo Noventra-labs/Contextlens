@@ -9,6 +9,11 @@ const SECRET_ID_TOKEN_KEY = 'contextlens.auth.idToken';
 const SECRET_REFRESH_TOKEN_KEY = 'contextlens.auth.refreshToken';
 const SECRET_UID_KEY = 'contextlens.auth.uid';
 
+// GlobalState keys for KI-001: survive workspace switches & restarts
+const GLOBAL_ID_TOKEN_KEY = 'contextlens.global.idToken';
+const GLOBAL_REFRESH_TOKEN_KEY = 'contextlens.global.refreshToken';
+const GLOBAL_UID_KEY = 'contextlens.global.uid';
+
 // Legacy key — we'll migrate away from it
 const SECRET_TOKEN_KEY = 'contextlens.auth.token';
 
@@ -73,10 +78,15 @@ export class AuthManager implements vscode.UriHandler {
       // Exchange the custom token for a real Firebase ID token
       const exchangeResult = await exchangeCustomTokenForIdToken(customToken);
 
-      // Store the real ID token (verifiable by backend) and refresh token
+      // Store in SecretStorage (primary)
       await this.context.secrets.store(SECRET_ID_TOKEN_KEY, exchangeResult.idToken);
       await this.context.secrets.store(SECRET_REFRESH_TOKEN_KEY, exchangeResult.refreshToken);
-      await this.context.secrets.store(SECRET_UID_KEY, exchangeResult.localId); // real UID from Firebase
+      await this.context.secrets.store(SECRET_UID_KEY, exchangeResult.localId);
+
+      // KI-001: Mirror to globalState for cross-workspace persistence
+      await this.context.globalState.update(GLOBAL_ID_TOKEN_KEY, exchangeResult.idToken);
+      await this.context.globalState.update(GLOBAL_REFRESH_TOKEN_KEY, exchangeResult.refreshToken);
+      await this.context.globalState.update(GLOBAL_UID_KEY, exchangeResult.localId);
 
       // Clean up legacy token if present
       await this.context.secrets.delete(SECRET_TOKEN_KEY);
@@ -133,10 +143,17 @@ export class AuthManager implements vscode.UriHandler {
    * Signs the user out by deleting all stored secrets and notifying listeners.
    */
   async signOut(): Promise<void> {
+    // Clear SecretStorage
     await this.context.secrets.delete(SECRET_ID_TOKEN_KEY);
     await this.context.secrets.delete(SECRET_REFRESH_TOKEN_KEY);
     await this.context.secrets.delete(SECRET_UID_KEY);
     await this.context.secrets.delete(SECRET_TOKEN_KEY); // legacy cleanup
+
+    // KI-001: Clear globalState mirror too
+    await this.context.globalState.update(GLOBAL_ID_TOKEN_KEY, undefined);
+    await this.context.globalState.update(GLOBAL_REFRESH_TOKEN_KEY, undefined);
+    await this.context.globalState.update(GLOBAL_UID_KEY, undefined);
+
     this._onDidSignOut.fire();
     vscode.window.showInformationMessage('ContextLens: Signed out.');
   }
@@ -149,17 +166,33 @@ export class AuthManager implements vscode.UriHandler {
    * @returns The stored UID and ID token, or null if not signed in or using legacy tokens.
    */
   async loadAuthState(): Promise<{ uid: string; token: string } | null> {
+    // 1. Try SecretStorage (primary, most secure)
     const idToken = await this.context.secrets.get(SECRET_ID_TOKEN_KEY);
     const uid = await this.context.secrets.get(SECRET_UID_KEY);
     if (idToken && uid) {
       return { uid, token: idToken };
     }
 
-    // Fallback: check for legacy token (pre-upgrade)
+    // 2. KI-001: Fallback to globalState (survives workspace switches)
+    const globalToken = this.context.globalState.get<string>(GLOBAL_ID_TOKEN_KEY);
+    const globalUid = this.context.globalState.get<string>(GLOBAL_UID_KEY);
+    if (globalToken && globalUid) {
+      // Re-hydrate SecretStorage from globalState so future reads are fast
+      await this.context.secrets.store(SECRET_ID_TOKEN_KEY, globalToken);
+      await this.context.secrets.store(SECRET_UID_KEY, globalUid);
+
+      const globalRefresh = this.context.globalState.get<string>(GLOBAL_REFRESH_TOKEN_KEY);
+      if (globalRefresh) {
+        await this.context.secrets.store(SECRET_REFRESH_TOKEN_KEY, globalRefresh);
+      }
+
+      console.log('[ContextLens] Auth re-hydrated from globalState (KI-001).');
+      return { uid: globalUid, token: globalToken };
+    }
+
+    // 3. Fallback: check for legacy token (pre-upgrade)
     const legacyToken = await this.context.secrets.get(SECRET_TOKEN_KEY);
     if (legacyToken && uid) {
-      // Legacy custom token — can't be used directly anymore.
-      // Clear and force re-sign-in.
       await this.context.secrets.delete(SECRET_TOKEN_KEY);
       return null;
     }
@@ -198,14 +231,26 @@ export class AuthManager implements vscode.UriHandler {
    */
   async tryRefreshToken(): Promise<boolean> {
     try {
-      const currentRefreshToken = await this.context.secrets.get(SECRET_REFRESH_TOKEN_KEY);
+      let currentRefreshToken = await this.context.secrets.get(SECRET_REFRESH_TOKEN_KEY);
+
+      // KI-001: Fallback to globalState if SecretStorage lost the refresh token
+      if (!currentRefreshToken) {
+        currentRefreshToken = this.context.globalState.get<string>(GLOBAL_REFRESH_TOKEN_KEY);
+      }
       if (!currentRefreshToken) {
         return false;
       }
 
       const result = await refreshIdToken(currentRefreshToken);
+
+      // Update SecretStorage
       await this.context.secrets.store(SECRET_ID_TOKEN_KEY, result.id_token);
       await this.context.secrets.store(SECRET_REFRESH_TOKEN_KEY, result.refresh_token);
+
+      // KI-001: Mirror refreshed tokens to globalState
+      await this.context.globalState.update(GLOBAL_ID_TOKEN_KEY, result.id_token);
+      await this.context.globalState.update(GLOBAL_REFRESH_TOKEN_KEY, result.refresh_token);
+
       return true;
     } catch (err) {
       console.error('Token refresh failed:', err);
@@ -217,10 +262,16 @@ export class AuthManager implements vscode.UriHandler {
    * Clear stored credentials and prompt to re-sign-in.
    */
   async handleSessionExpired(): Promise<void> {
+    // Clear all storage layers
     await this.context.secrets.delete(SECRET_ID_TOKEN_KEY);
     await this.context.secrets.delete(SECRET_REFRESH_TOKEN_KEY);
     await this.context.secrets.delete(SECRET_UID_KEY);
     await this.context.secrets.delete(SECRET_TOKEN_KEY); // legacy
+
+    // KI-001: Clear globalState too
+    await this.context.globalState.update(GLOBAL_ID_TOKEN_KEY, undefined);
+    await this.context.globalState.update(GLOBAL_REFRESH_TOKEN_KEY, undefined);
+    await this.context.globalState.update(GLOBAL_UID_KEY, undefined);
 
     const action = await vscode.window.showWarningMessage(
       'ContextLens: Session expired. Please sign in again.',

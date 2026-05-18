@@ -20,6 +20,10 @@ export interface Episode {
   note: string;
   /** The branch this episode is associated with. */
   branchName: string;
+  /** Timestamp (ms) when this episode was created. */
+  startedAt: number;
+  /** Timestamp (ms) of the last recorded activity (save, commit, call). */
+  lastActivityAt: number;
 }
 
 /**
@@ -116,6 +120,33 @@ export class EpisodeStore {
     await this.syncEngine?.forceFlush();
   }
 
+  /**
+   * Returns a human-readable string of how long the active episode has been running.
+   * E.g. "2h 15m", "45m", "3d 1h".
+   */
+  public getElapsedTime(): string | null {
+    if (!this.activeEpisode?.startedAt) return null;
+    const ms = Date.now() - this.activeEpisode.startedAt;
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (days > 0) return `${days}d ${hours % 24}h`;
+    if (hours > 0) return `${hours}h ${minutes % 60}m`;
+    return `${minutes}m`;
+  }
+
+  /**
+   * Checks if the active episode is stale (open >24h with no recent activity).
+   * "No recent activity" means no file saves, commits, or AI calls in the last 24h.
+   */
+  public isStale(): boolean {
+    if (!this.activeEpisode?.lastActivityAt) return false;
+    const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
+    return (Date.now() - this.activeEpisode.lastActivityAt) > STALE_THRESHOLD_MS;
+  }
+
   // ── Project auto-resolve ───────────────────────────────────────────────────
 
   /**
@@ -208,6 +239,7 @@ export class EpisodeStore {
         branchName,
       });
 
+      const now = Date.now();
       this.activeEpisode = {
         id: res.episodeId,
         name: trimmedName,
@@ -215,6 +247,8 @@ export class EpisodeStore {
         changedFiles: [],
         note: '',
         branchName,
+        startedAt: now,
+        lastActivityAt: now,
       };
       this.save();
     } catch (err: any) {
@@ -296,6 +330,7 @@ export class EpisodeStore {
       }
     });
 
+    const now = Date.now();
     this.activeEpisode = {
       id: tempEpisodeId, // This will be reconciled on backend
       name: trimmedName,
@@ -303,6 +338,8 @@ export class EpisodeStore {
       changedFiles: [],
       note: '',
       branchName: branchName || 'main',
+      startedAt: now,
+      lastActivityAt: now,
     };
     this.save();
   }
@@ -336,6 +373,7 @@ export class EpisodeStore {
   public incrementCallCount() {
     if (this.activeEpisode) {
       this.activeEpisode.callCount += 1;
+      this.activeEpisode.lastActivityAt = Date.now();
       this.save();
     }
   }
@@ -348,6 +386,7 @@ export class EpisodeStore {
   public addChangedFile(filePath: string) {
     if (this.activeEpisode && !this.activeEpisode.changedFiles.includes(filePath)) {
       this.activeEpisode.changedFiles.push(filePath);
+      this.activeEpisode.lastActivityAt = Date.now();
       this.save();
     }
   }

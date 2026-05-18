@@ -1,3 +1,4 @@
+import * as vscode from 'vscode';
 import * as https from 'https';
 import * as http from 'http';
 import { getAuthManager } from './auth';
@@ -170,13 +171,32 @@ async function request<T>(path: string, body?: object): Promise<T> {
   const authManager = getAuthManager();
   let token = await authManager.getIdToken();
 
+  // KI-002: Auth-state guard — prevent silent failures when token is missing
+  if (!token) {
+    // Attempt a token refresh first (handles globalState re-hydration)
+    const refreshed = await authManager.tryRefreshToken();
+    if (refreshed) {
+      token = await authManager.getIdToken();
+    }
+
+    if (!token) {
+      // Still no token — surface notification (non-blocking, not a modal)
+      vscode.window.showWarningMessage(
+        'ContextLens: Not authenticated. Please sign in to sync data.',
+        'Sign In'
+      ).then(action => {
+        if (action === 'Sign In') {
+          vscode.commands.executeCommand('contextlens.signIn');
+        }
+      });
+      throw new Error('Not authenticated — sign in required.');
+    }
+  }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
   };
-
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
 
   const jsonBody = body ? JSON.stringify(body) : undefined;
   if (jsonBody) {
