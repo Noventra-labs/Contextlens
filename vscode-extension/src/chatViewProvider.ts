@@ -6,8 +6,28 @@ import { EpisodeStore } from './episodeStore';
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'contextlens.chatView';
   private _view?: vscode.WebviewView;
+  private _providerName: string = 'Gemini';
 
-  constructor(private readonly _extensionUri: vscode.Uri) { }
+  constructor(private readonly _extensionUri: vscode.Uri) {
+    // Fetch provider name in the background
+    this._refreshProviderName();
+  }
+
+  private async _refreshProviderName(): Promise<void> {
+    try {
+      const settings = await ApiClient.getSettings();
+      switch (settings.aiProvider) {
+        case 'openai': this._providerName = 'OpenAI'; break;
+        case 'anthropic': this._providerName = 'Anthropic'; break;
+        case 'gemini': this._providerName = 'Gemini'; break;
+        default: this._providerName = 'Gemini'; break;
+      }
+      // Notify the webview of the updated provider name
+      this._view?.webview.postMessage({ type: 'setProvider', value: this._providerName });
+    } catch {
+      // Keep default
+    }
+  }
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -22,6 +42,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     };
 
     webviewView.webview.html = this._getHtmlForWebview();
+    // Send current provider name to webview
+    webviewView.webview.postMessage({ type: 'setProvider', value: this._providerName });
 
     webviewView.webview.onDidReceiveMessage(async data => {
       switch (data.type) {
@@ -236,7 +258,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
         <div class="input-area">
           <input type="text" id="intent" placeholder="Intent tag (optional — e.g. &quot;auth refactor&quot;)" />
-          <textarea id="prompt" placeholder="Ask Gemini anything..."></textarea>
+          <textarea id="prompt" placeholder="Ask AI anything..."></textarea>
           <div class="btn-row">
             <button id="send-btn">✦ Send</button>
             <button id="retry-btn">↻ Retry</button>
@@ -253,6 +275,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           const chatHistory = document.getElementById('chat-history');
           let lastPrompt = '';
           let isLoading = false;
+          let providerName = 'AI';
 
           function setLoading(loading) {
             isLoading = loading;
@@ -268,7 +291,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
               const div = document.createElement('div');
               div.id = 'loading-indicator';
               div.className = 'message loading-msg';
-              div.innerHTML = '<div class="spinner"></div> Gemini is thinking...';
+              div.innerHTML = '<div class="spinner"></div> ' + providerName + ' is thinking...';
               chatHistory.appendChild(div);
               chatHistory.scrollTop = chatHistory.scrollHeight;
             }
@@ -307,7 +330,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
             setLoading(false);
             switch (message.type) {
               case 'addResponse':
-                addMessage('Gemini ✦', message.value, 'ai-msg');
+                addMessage(providerName + ' ✦', message.value, 'ai-msg');
+                break;
+              case 'setProvider':
+                providerName = message.value || 'AI';
+                promptInput.placeholder = 'Ask ' + providerName + ' anything...';
                 break;
               case 'error':
                 addMessage('Error', message.value, 'error-msg');

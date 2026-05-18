@@ -1,5 +1,7 @@
 const { VertexAI } = require('@google-cloud/vertexai');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const OpenAI = require('openai');
+const Anthropic = require('@anthropic-ai/sdk');
 const { randomUUID } = require('crypto');
 const { redactText } = require('../lib/redaction');
 
@@ -88,34 +90,95 @@ async function generateWithRetry(model, contents, generationConfig) {
 }
 
 /**
- * Calls the Gemini model with a standardized interface.
- * Supports custom API keys via options.customApiKey.
+ * Calls the AI model with a standardized interface.
+ * Supports custom API keys and providers via options.customApiKey and options.provider.
  * 
  * @param {string} prompt - The user prompt.
  * @param {string} [modelName] - The model to use.
- * @param {Object} [options] - Generation options (temperature, customApiKey, etc.).
+ * @param {Object} [options] - Generation options (temperature, customApiKey, provider, etc.).
  * @returns {Promise<Object>} The result object containing the generated text and metadata.
  */
-async function callGemini(prompt, modelName = 'gemini-1.5-pro', options = {}) {
+async function callGemini(prompt, modelName, options = {}) {
   const sanitizedPrompt = redactText(prompt);
   const timeoutMs = Number(process.env.VERTEX_TIMEOUT_MS || 30000);
+  const provider = options.provider || 'gemini';
   
-  // If custom API key is provided, use Google Generative AI SDK
+  if (provider === 'openai') {
+    const openai = new OpenAI({ apiKey: options.customApiKey });
+    const { promise: timeoutPromise, timer } = createTimeoutPromise(timeoutMs);
+    try {
+      const response = await Promise.race([
+        openai.chat.completions.create({
+          model: modelName || 'gpt-4o',
+          messages: [{ role: 'user', content: sanitizedPrompt }],
+          temperature: options.temperature ?? 0.2,
+          max_tokens: options.maxOutputTokens ?? 1024,
+          response_format: options.responseMimeType === 'application/json' ? { type: "json_object" } : undefined,
+        }),
+        timeoutPromise,
+      ]);
+      const text = response.choices[0]?.message?.content || '';
+      return {
+        id: randomUUID(),
+        model: response.model || modelName || 'gpt-4o',
+        text,
+        structured: safeJsonParse(text),
+        tokens: {
+          prompt: response.usage?.prompt_tokens,
+          completion: response.usage?.completion_tokens,
+        },
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  if (provider === 'anthropic') {
+    const anthropic = new Anthropic({ apiKey: options.customApiKey });
+    const { promise: timeoutPromise, timer } = createTimeoutPromise(timeoutMs);
+    try {
+      const response = await Promise.race([
+        anthropic.messages.create({
+          model: modelName || 'claude-3-5-sonnet-latest',
+          max_tokens: options.maxOutputTokens ?? 1024,
+          temperature: options.temperature ?? 0.2,
+          messages: [{ role: 'user', content: sanitizedPrompt }],
+        }),
+        timeoutPromise,
+      ]);
+      const text = response.content.map(c => c.text).join('') || '';
+      return {
+        id: randomUUID(),
+        model: response.model || modelName || 'claude-3-5-sonnet-latest',
+        text,
+        structured: safeJsonParse(text),
+        tokens: {
+          prompt: response.usage?.input_tokens,
+          completion: response.usage?.output_tokens,
+        },
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // fallback to gemini
   let model;
+  const resolvedModelName = modelName || 'gemini-1.5-pro';
   if (options.customApiKey) {
     const genAI = new GoogleGenerativeAI(options.customApiKey);
-    model = genAI.getGenerativeModel({ model: modelName || 'gemini-1.5-pro' });
+    model = genAI.getGenerativeModel({ model: resolvedModelName });
   } else {
     if (!useVertex) {
       return {
         id: randomUUID(),
-        model: modelName,
+        model: resolvedModelName,
         text: `MOCK_RESPONSE: ${sanitizedPrompt.slice(0, 400)}`,
         tokens: { prompt: 10, completion: 50 },
         structured: null,
       };
     }
-    model = getVertexModel(modelName);
+    model = getVertexModel(resolvedModelName);
   }
 
   const generationConfig = {
@@ -134,7 +197,6 @@ async function callGemini(prompt, modelName = 'gemini-1.5-pro', options = {}) {
     let rawText = '';
     let usage = null;
     
-    // Extract text depending on the SDK used
     if (options.customApiKey) {
       rawText = response.response.text();
       usage = response.response.usageMetadata || null;
@@ -148,7 +210,7 @@ async function callGemini(prompt, modelName = 'gemini-1.5-pro', options = {}) {
 
     return {
       id: randomUUID(),
-      model: modelName,
+      model: resolvedModelName,
       text: rawText,
       structured,
       tokens: usage,

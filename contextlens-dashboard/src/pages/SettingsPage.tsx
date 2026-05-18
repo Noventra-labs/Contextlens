@@ -1,20 +1,62 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Code, ExternalLink } from 'lucide-react'
+import { Code, ExternalLink, Key, Check } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
-import { useProjects } from '../lib/firestoreHooks'
+import { useProjects, useUserSettings } from '../lib/firestoreHooks'
+import { doc, setDoc } from 'firebase/firestore'
+import { db } from '../lib/firebase'
 
 export function SettingsPage() {
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
   const { data: projects } = useProjects(user?.uid ?? '')
+  const { data: userSettings } = useUserSettings(user?.uid ?? '')
   const [selectedProjectId, setSelectedProjectId] = useState<string>('')
+  
+  const [aiProvider, setAiProvider] = useState<'gemini' | 'openai' | 'anthropic' | 'none'>('none')
+  const [apiKeys, setApiKeys] = useState({
+    gemini: '',
+    openai: '',
+    anthropic: ''
+  })
+  const [isSavingSettings, setIsSavingSettings] = useState(false)
+  const [savedMessage, setSavedMessage] = useState('')
+
+  useEffect(() => {
+    if (userSettings) {
+      setAiProvider(userSettings.aiProvider || 'none')
+      setApiKeys({
+        gemini: userSettings.geminiApiKey || '',
+        openai: userSettings.openaiApiKey || '',
+        anthropic: userSettings.anthropicApiKey || ''
+      })
+    }
+  }, [userSettings])
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId)
 
   const handleSignOut = async () => {
     await signOut()
     navigate('/login')
+  }
+
+  const handleSaveSettings = async () => {
+    if (!user) return
+    setIsSavingSettings(true)
+    try {
+      await setDoc(doc(db, `users/${user.uid}/settings/global`), {
+        aiProvider,
+        geminiApiKey: apiKeys.gemini,
+        openaiApiKey: apiKeys.openai,
+        anthropicApiKey: apiKeys.anthropic
+      }, { merge: true })
+      setSavedMessage('Settings saved successfully!')
+      setTimeout(() => setSavedMessage(''), 3000)
+    } catch (err) {
+      console.error("Failed to save settings", err)
+    } finally {
+      setIsSavingSettings(false)
+    }
   }
 
   return (
@@ -83,6 +125,113 @@ export function SettingsPage() {
               Connect VS Code
               <ExternalLink className="w-3.5 h-3.5" />
             </a>
+          </div>
+        </div>
+      </section>
+
+      {/* AI Provider section */}
+      <section className="mb-8">
+        <h2 className="text-[11px] font-semibold text-textMuted uppercase tracking-wider mb-3">
+          AI Provider Settings
+        </h2>
+        <div className="bg-card border border-cardBorder rounded-lg p-5 space-y-4">
+          <div>
+            <label className="block text-xs text-textMuted mb-1.5">Select AI Provider</label>
+            <select
+              value={aiProvider}
+              onChange={(e) => setAiProvider(e.target.value as any)}
+              className="w-full bg-surface border border-cardBorder rounded-md px-3 py-2 text-sm text-textPrimary focus:outline-none focus:border-primary/60 transition-colors"
+            >
+              <option value="none">Default Server-Side Provider (Gemini)</option>
+              <option value="gemini">Google Gemini (Bring your own key)</option>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+            </select>
+          </div>
+
+          {aiProvider === 'gemini' && (
+            <div>
+              <label className="block text-xs text-textMuted mb-1.5">Gemini API Key</label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-textMuted">
+                    <Key className="w-4 h-4" />
+                  </div>
+                  <input
+                    type="password"
+                    value={apiKeys.gemini}
+                    onChange={(e) => setApiKeys({ ...apiKeys, gemini: e.target.value })}
+                    placeholder="AIzaSy..."
+                    className="w-full bg-surface border border-cardBorder rounded-md pl-9 pr-3 py-2 text-sm text-textPrimary focus:outline-none focus:border-primary/60 transition-colors"
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-textMuted mt-1.5">
+                Your key is stored securely and sent directly to Google. It's never logged or persisted.
+              </p>
+            </div>
+          )}
+          {aiProvider === 'openai' && (
+            <div>
+              <label className="block text-xs text-textMuted mb-1.5">OpenAI API Key</label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-textMuted">
+                    <Key className="w-4 h-4" />
+                  </div>
+                  <input
+                    type="password"
+                    value={apiKeys.openai}
+                    onChange={(e) => setApiKeys({ ...apiKeys, openai: e.target.value })}
+                    placeholder="sk-..."
+                    className="w-full bg-surface border border-cardBorder rounded-md pl-9 pr-3 py-2 text-sm text-textPrimary focus:outline-none focus:border-primary/60 transition-colors"
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-textMuted mt-1.5">
+                Your key is stored securely and sent directly to OpenAI. It's never logged or persisted.
+              </p>
+            </div>
+          )}
+          {aiProvider === 'anthropic' && (
+            <div>
+              <label className="block text-xs text-textMuted mb-1.5">Anthropic API Key</label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-textMuted">
+                    <Key className="w-4 h-4" />
+                  </div>
+                  <input
+                    type="password"
+                    value={apiKeys.anthropic}
+                    onChange={(e) => setApiKeys({ ...apiKeys, anthropic: e.target.value })}
+                    placeholder="sk-ant-..."
+                    className="w-full bg-surface border border-cardBorder rounded-md pl-9 pr-3 py-2 text-sm text-textPrimary focus:outline-none focus:border-primary/60 transition-colors"
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-textMuted mt-1.5">
+                Your key is stored securely and sent directly to Anthropic. It's never logged or persisted.
+              </p>
+            </div>
+          )}
+
+          <div className="border-t border-cardBorder pt-4 flex items-center justify-between">
+            {savedMessage ? (
+              <span className="text-sm text-green-400 flex items-center gap-1.5">
+                <Check className="w-4 h-4" />
+                {savedMessage}
+              </span>
+            ) : (
+              <span />
+            )}
+            <button
+              onClick={handleSaveSettings}
+              disabled={isSavingSettings}
+              className="px-4 py-2 rounded-md bg-primary text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {isSavingSettings ? 'Saving...' : 'Save Settings'}
+            </button>
           </div>
         </div>
       </section>

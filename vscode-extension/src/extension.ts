@@ -384,6 +384,89 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // ── Command: Configure AI Provider ──────────────────────────────────────
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('contextlens.configureProvider', async () => {
+      const authState = await authManager.loadAuthState();
+      if (!authState) {
+        vscode.window.showWarningMessage('Sign in first to configure your AI provider.');
+        return;
+      }
+
+      // Fetch current settings
+      let currentSettings: { aiProvider: string; hasGeminiKey: boolean; hasOpenaiKey: boolean; hasAnthropicKey: boolean };
+      try {
+        currentSettings = await ApiClient.getSettings();
+      } catch {
+        currentSettings = { aiProvider: 'none', hasGeminiKey: false, hasOpenaiKey: false, hasAnthropicKey: false };
+      }
+
+      const providerPick = await vscode.window.showQuickPick(
+        [
+          { label: '$(server) Default (Server-side Gemini)', value: 'none', description: 'Uses the server\'s built-in Gemini key' },
+          { label: '$(key) Gemini (Bring your own key)', value: 'gemini', description: currentSettings.hasGeminiKey ? '✓ Key configured' : 'No key set' },
+          { label: '$(key) OpenAI', value: 'openai', description: currentSettings.hasOpenaiKey ? '✓ Key configured' : 'No key set' },
+          { label: '$(key) Anthropic', value: 'anthropic', description: currentSettings.hasAnthropicKey ? '✓ Key configured' : 'No key set' },
+        ],
+        {
+          placeHolder: `Current provider: ${currentSettings.aiProvider === 'none' ? 'Default (Server Gemini)' : currentSettings.aiProvider}`,
+          title: 'ContextLens: Select AI Provider',
+        }
+      );
+
+      if (!providerPick) return;
+
+      const selectedProvider = providerPick.value;
+
+      // If selecting a BYO-key provider, prompt for the key
+      if (selectedProvider !== 'none') {
+        const keyPlaceholder = selectedProvider === 'gemini' ? 'AIzaSy...' : selectedProvider === 'openai' ? 'sk-...' : 'sk-ant-...';
+        const apiKey = await vscode.window.showInputBox({
+          prompt: `Enter your ${selectedProvider} API key (leave blank to keep existing)`,
+          placeHolder: keyPlaceholder,
+          password: true,
+          ignoreFocusOut: true,
+        });
+
+        // User cancelled the input
+        if (apiKey === undefined) return;
+
+        try {
+          const updateBody: any = { aiProvider: selectedProvider };
+          if (apiKey) {
+            updateBody[`${selectedProvider}ApiKey`] = apiKey;
+          }
+          await ApiClient.updateSettings(updateBody);
+
+          // Cache the API key locally in VS Code SecretStorage for offline/fast access
+          if (apiKey) {
+            await context.secrets.store(`contextlens.apiKey.${selectedProvider}`, apiKey);
+          }
+          // Remember which provider is active
+          await context.secrets.store('contextlens.activeProvider', selectedProvider);
+
+          vscode.window.showInformationMessage(`ContextLens: Provider set to ${selectedProvider}${apiKey ? ' with new API key' : ''} ✦`);
+        } catch (err: any) {
+          vscode.window.showErrorMessage(`Failed to save provider settings: ${err.message}`);
+          return;
+        }
+      } else {
+        try {
+          await ApiClient.updateSettings({ aiProvider: 'none' });
+          vscode.window.showInformationMessage('ContextLens: Using default server-side Gemini ✦');
+        } catch (err: any) {
+          vscode.window.showErrorMessage(`Failed to save provider settings: ${err.message}`);
+          return;
+        }
+      }
+
+      // Refresh status bar to show updated provider
+      statusBar.render();
+      Telemetry.log('Provider Configured', { provider: selectedProvider });
+    })
+  );
+
   // ── Deactivation ──────────────────────────────────────────────────────────
   context.subscriptions.push({
     dispose: () => {

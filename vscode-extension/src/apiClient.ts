@@ -379,6 +379,34 @@ export class ApiClient {
     return request('/branches/summarize', body);
   }
 
+  // ── Settings ───────────────────────────────────────────────────────────────
+
+  /**
+   * Retrieves the user's AI provider settings from the backend.
+   * Returns provider selection and hasKey flags (never raw keys).
+   */
+  static async getSettings(): Promise<{
+    aiProvider: string;
+    hasGeminiKey: boolean;
+    hasOpenaiKey: boolean;
+    hasAnthropicKey: boolean;
+  }> {
+    return request('/settings/get');
+  }
+
+  /**
+   * Updates the user's AI provider settings on the backend.
+   * Supports setting provider and/or individual API keys.
+   */
+  static async updateSettings(body: {
+    aiProvider?: string;
+    geminiApiKey?: string;
+    openaiApiKey?: string;
+    anthropicApiKey?: string;
+  }): Promise<{ saved: boolean }> {
+    return request('/settings/update', body);
+  }
+
   // ── Dashboard URLs ───────────────────────────────────────────────────────
 
   /**

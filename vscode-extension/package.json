@@ -74,6 +74,10 @@
       {
         "command": "contextlens.logExternalCall",
         "title": "ContextLens: Log External AI Call"
+      },
+      {
+        "command": "contextlens.configureProvider",
+        "title": "ContextLens: Configure AI Provider"
       }
     ],
     "viewsContainers": {
@@ -94,7 +98,7 @@
         },
         {
           "id": "contextlens.chatView",
-          "name": "Gemini Chat",
+          "name": "AI Chat",
           "type": "webview"
         }
       ]

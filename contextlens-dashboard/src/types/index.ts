@@ -13,6 +13,14 @@ export interface Project {
   }
 }
 
+export interface UserSettings {
+  id?: string
+  aiProvider: 'gemini' | 'openai' | 'anthropic' | 'none'
+  geminiApiKey?: string
+  openaiApiKey?: string
+  anthropicApiKey?: string
+}
+
 export interface Episode {
   id: string
   projectId: string

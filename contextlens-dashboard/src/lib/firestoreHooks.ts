@@ -12,7 +12,7 @@ import {
   QuerySnapshot,
 } from 'firebase/firestore'
 import { db } from './firebase'
-import type { Project, Episode, Call } from '../types'
+import type { Project, Episode, Call, UserSettings } from '../types'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const toDate = (ts: any): Date => ts?.toDate?.() ?? new Date(ts)
@@ -109,6 +109,31 @@ export function useProjects(uid: string) {
   )
 
   return { data: data ?? [], loading, error }
+}
+
+// ─── useUserSettings ─────────────────────────────────────────────────────────
+
+export function useUserSettings(uid: string) {
+  const { data, loading, error } = useFirestoreQuery<UserSettings | null>(
+    `user-settings-${uid}`,
+    () => doc(db, `users/${uid}/settings/global`),
+    (snap: DocumentSnapshot) => {
+      if (!snap.exists()) {
+        return { aiProvider: 'none' } as UserSettings
+      }
+      const data = snap.data()
+      return {
+        id: snap.id,
+        aiProvider: data.aiProvider ?? 'none',
+        geminiApiKey: data.geminiApiKey ?? '',
+        openaiApiKey: data.openaiApiKey ?? '',
+        anthropicApiKey: data.anthropicApiKey ?? '',
+      } as UserSettings
+    },
+    [uid]
+  )
+
+  return { data, loading, error }
 }
 
 // ─── useEpisodes ──────────────────────────────────────────────────────────────
