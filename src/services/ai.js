@@ -1,4 +1,5 @@
 const { VertexAI } = require('@google-cloud/vertexai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { randomUUID } = require('crypto');
 const { redactText } = require('../lib/redaction');
 
@@ -57,9 +58,10 @@ function createTimeoutPromise(timeoutMs) {
 }
 
 /**
- * Executes a Vertex AI content generation with retries for transient errors.
+ * Executes a Generative AI content generation with retries for transient errors.
+ * Works with both Vertex AI and Google Generative AI models.
  * 
- * @param {import('@google-cloud/vertexai').GenerativeModel} model - The model instance.
+ * @param {Object} model - The model instance.
  * @param {Array} contents - The prompt contents.
  * @param {Object} generationConfig - Configuration for generation.
  * @returns {Promise<Object>} The model response.
@@ -86,27 +88,36 @@ async function generateWithRetry(model, contents, generationConfig) {
 }
 
 /**
- * Calls the Gemini model (via Vertex AI) with a standardized interface.
+ * Calls the Gemini model with a standardized interface.
+ * Supports custom API keys via options.customApiKey.
  * 
  * @param {string} prompt - The user prompt.
  * @param {string} [modelName] - The model to use.
- * @param {Object} [options] - Generation options (temperature, etc.).
+ * @param {Object} [options] - Generation options (temperature, customApiKey, etc.).
  * @returns {Promise<Object>} The result object containing the generated text and metadata.
  */
 async function callGemini(prompt, modelName = 'gemini-1.5-pro', options = {}) {
   const sanitizedPrompt = redactText(prompt);
   const timeoutMs = Number(process.env.VERTEX_TIMEOUT_MS || 30000);
-  if (!useVertex) {
-    return {
-      id: randomUUID(),
-      model: modelName,
-      text: `MOCK_RESPONSE: ${sanitizedPrompt.slice(0, 400)}`,
-      tokens: { prompt: 10, completion: 50 },
-      structured: null,
-    };
+  
+  // If custom API key is provided, use Google Generative AI SDK
+  let model;
+  if (options.customApiKey) {
+    const genAI = new GoogleGenerativeAI(options.customApiKey);
+    model = genAI.getGenerativeModel({ model: modelName || 'gemini-1.5-pro' });
+  } else {
+    if (!useVertex) {
+      return {
+        id: randomUUID(),
+        model: modelName,
+        text: `MOCK_RESPONSE: ${sanitizedPrompt.slice(0, 400)}`,
+        tokens: { prompt: 10, completion: 50 },
+        structured: null,
+      };
+    }
+    model = getVertexModel(modelName);
   }
 
-  const model = getVertexModel(modelName);
   const generationConfig = {
     temperature: options.temperature ?? 0.2,
     maxOutputTokens: options.maxOutputTokens ?? 1024,
@@ -120,10 +131,20 @@ async function callGemini(prompt, modelName = 'gemini-1.5-pro', options = {}) {
       timeoutPromise,
     ]);
 
-    const candidate = response.response?.candidates?.[0];
-    const rawText = candidate?.content?.parts?.map((part) => part.text || '').join('') || '';
+    let rawText = '';
+    let usage = null;
+    
+    // Extract text depending on the SDK used
+    if (options.customApiKey) {
+      rawText = response.response.text();
+      usage = response.response.usageMetadata || null;
+    } else {
+      const candidate = response.response?.candidates?.[0];
+      rawText = candidate?.content?.parts?.map((part) => part.text || '').join('') || '';
+      usage = response.response?.usageMetadata || null;
+    }
+    
     const structured = safeJsonParse(rawText);
-    const usage = response.response?.usageMetadata || null;
 
     return {
       id: randomUUID(),

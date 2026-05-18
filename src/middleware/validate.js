@@ -84,6 +84,7 @@ const logCallRules = [
   body('modelResponse').optional().isLength({ max: 100000 }),
   body('branchName').optional().trim().isLength({ max: 200 }),
   body('activeFilePath').optional().trim().isLength({ max: 1000 }),
+  body('customApiKey').optional().trim().isString(),
   handleValidation,
 ];
 
@@ -92,6 +93,7 @@ const explainRules = [
   isUUID('episodeId'),
   isNonEmptyString('diffHash', 128),
   body('changedFiles').optional().isArray({ max: 100 }),
+  body('customApiKey').optional().trim().isString(),
   handleValidation,
 ];
 
@@ -99,6 +101,7 @@ const summarizeRules = [
   isUUID('projectId'),
   isNonEmptyString('branchName', 200),
   body('episodes').optional().isArray({ max: 200 }),
+  body('customApiKey').optional().trim().isString(),
   handleValidation,
 ];
 

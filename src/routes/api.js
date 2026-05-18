@@ -118,7 +118,7 @@ router.post('/calls/log', aiLimiter, logCallRules, async (req, res) => {
       };
     } else {
       // Native AI chat call
-      aiResp = await callGemini(promptText, modelName || 'gemini');
+      aiResp = await callGemini(promptText, modelName || 'gemini', { customApiKey: payload.customApiKey });
     }
     
     const latencyMs = Date.now() - started;
@@ -175,7 +175,7 @@ router.post('/calls/log', aiLimiter, logCallRules, async (req, res) => {
  */
 router.post('/episodes/explain', aiLimiter, explainRules, async (req, res) => {
   const { uid } = req.user;
-  const { projectId, episodeId, diffHash, changedFiles } = req.body;
+  const { projectId, episodeId, diffHash, changedFiles, customApiKey } = req.body;
   
   try {
     const cacheRef = db.collection('users').doc(uid).collection('projects').doc(projectId).collection('episodes').doc(episodeId).collection('cache').doc(diffHash);
@@ -184,7 +184,7 @@ router.post('/episodes/explain', aiLimiter, explainRules, async (req, res) => {
 
     const changedFilesList = (changedFiles || []).join(', ');
     const prompt = explainDiffTemplate({ changedFilesList });
-    const aiResp = await callGemini(prompt, 'gemini-1.5-pro', { responseMimeType: 'application/json', maxOutputTokens: 768 });
+    const aiResp = await callGemini(prompt, 'gemini-1.5-pro', { responseMimeType: 'application/json', maxOutputTokens: 768, customApiKey });
     const result = structuredOrFallback(aiResp, (text) => ({ summary: text, risks: [], checks: [] }));
     const normalized = {
       summary: result.summary || aiResp.text,
@@ -213,12 +213,12 @@ router.post('/episodes/explain', aiLimiter, explainRules, async (req, res) => {
  */
 router.post('/branches/summarize', aiLimiter, summarizeRules, async (req, res) => {
   const { uid } = req.user;
-  const { projectId, branchName, episodes } = req.body;
+  const { projectId, branchName, episodes, customApiKey } = req.body;
   
   try {
     const episodesSummaryList = (episodes || []).map((e) => e.episodeSummary || e.label || '').join('\n');
     const prompt = branchSummaryTemplate({ episodesSummaryList });
-    const aiResp = await callGemini(prompt, 'gemini-1.5-pro', { responseMimeType: 'application/json', maxOutputTokens: 1024 });
+    const aiResp = await callGemini(prompt, 'gemini-1.5-pro', { responseMimeType: 'application/json', maxOutputTokens: 1024, customApiKey });
     const result = structuredOrFallback(aiResp, (text) => ({ pr_summary: text, key_changes: [], review_risks: [] }));
     const responseData = {
       pr_summary: result.pr_summary || aiResp.text,
