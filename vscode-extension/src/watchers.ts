@@ -6,6 +6,8 @@ import { EpisodeStore } from './episodeStore';
 import { ApiClient } from './apiClient';
 import { Redaction } from './redaction';
 import { getAuthManager } from './auth';
+import { NotificationService } from './NotificationService';
+import { EventDeduplicator } from './EventDeduplicator';
 
 export interface WatcherDeps {
   context: vscode.ExtensionContext;
@@ -19,6 +21,8 @@ let lastBranch: string | null = null;
 let lastCommitMessage: string = '';
 let branchCooldown = false;
 let commitDebounce: ReturnType<typeof setTimeout> | null = null;
+const deduplicator = new EventDeduplicator();
+const notifier = NotificationService.getInstance();
 
 /** Maximum diff size sent to sync engine (ENH-002) */
 const MAX_DIFF_CHARS = 6000;
@@ -92,9 +96,7 @@ function watchBranch(gitDir: string, deps: WatcherDeps): void {
         deps.stateTreeProvider.refresh();
         deps.statusBar.render();
 
-        vscode.window.showInformationMessage(
-          `ContextLens: Branch "${branch}" — episode started.`
-        );
+        notifier.info(`Branch "${branch}" — episode started.`);
       } catch { /* silent */ }
     }, 2000);
   });
@@ -194,9 +196,11 @@ function watchFileSaves(deps: WatcherDeps): void {
         const codeExts = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.java', '.kt', '.swift', '.rs', '.rb', '.php', '.cs', '.c', '.cpp', '.h', '.hpp', '.vue', '.svelte', '.dart', '.lua', '.sh', '.bash', '.zsh', '.yaml', '.yml', '.json', '.toml', '.md', '.sql', '.graphql', '.proto'];
         if (!codeExts.includes(ext)) return;
 
-        // Add to local list (which triggers refresh)
-        episodeStore.addChangedFile(doc.uri.fsPath);
-        deps.stateTreeProvider.refresh();
+        // Debounce per-file to avoid rapid-fire events
+        deduplicator.debounce('file_save', doc.uri.fsPath, () => {
+          episodeStore.addChangedFile(doc.uri.fsPath);
+          deps.stateTreeProvider.refresh();
+        });
 
       } catch { /* silent */ }
     })
@@ -310,7 +314,7 @@ function startStaleEpisodeDetector(deps: WatcherDeps): void {
           await episodeStore.closeEpisode();
           deps.stateTreeProvider.refresh();
           deps.statusBar.render();
-          vscode.window.showInformationMessage('ContextLens: Stale episode closed.');
+          notifier.success('Stale episode closed.');
         }
       }
     } catch { /* silent */ }

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { AuthManager } from './auth';
 import { EpisodeStore } from './episodeStore';
 import { ApiClient } from './apiClient';
+import type { SyncState } from './syncEngine';
 
 /**
  * Manages the ContextLens status bar item.
@@ -12,6 +13,8 @@ export class ContextLensStatusBar {
   private statusBarItem: vscode.StatusBarItem;
   private authManager: AuthManager;
   private cachedProvider: string = '';
+  private syncState: SyncState = 'idle';
+  private syncPending: number = 0;
 
   constructor(context: vscode.ExtensionContext, authManager: AuthManager) {
     this.authManager = authManager;
@@ -101,14 +104,35 @@ export class ContextLensStatusBar {
 
   private renderActiveEpisode(ep: any) {
     const sync = EpisodeStore.get().getSyncStatus();
-    const syncText = sync.pending > 0 ? ` (syncing ${sync.pending}...)` : '';
+    const pending = sync.pending || this.syncPending;
+
+    let syncText = '';
+    if (this.syncState === 'offline') {
+      syncText = ` · Offline${pending > 0 ? ` • ${pending} pending` : ''}`;
+    } else if (this.syncState === 'syncing') {
+      syncText = ` (syncing ${pending}…)`;
+    } else if (this.syncState === 'paused-auth') {
+      syncText = ' · Auth expired';
+    } else if (pending > 0) {
+      syncText = ` (${pending} pending)`;
+    }
+
     const providerSuffix = this.cachedProvider ? ` · ${this.cachedProvider}` : '';
     
     this.statusBarItem.text = `$(circle-filled) ContextLens: ${ep.name} · ${ep.callCount} calls${syncText}${providerSuffix}`;
-    this.statusBarItem.tooltip = `${ep.name} on ${ep.branchName} — ${ep.callCount} AI calls. ${sync.pending} items pending sync.\nAI Provider: ${this.cachedProvider || 'Gemini (default)'}`;
+    this.statusBarItem.tooltip = `${ep.name} on ${ep.branchName} — ${ep.callCount} AI calls. ${pending} items pending sync.\nSync: ${this.syncState}\nAI Provider: ${this.cachedProvider || 'Gemini (default)'}`;
     this.statusBarItem.command = 'contextlens.openDashboardEpisode';
-    this.statusBarItem.color = new vscode.ThemeColor('statusBarItem.prominentForeground');
+    this.statusBarItem.color = this.syncState === 'offline'
+      ? new vscode.ThemeColor('statusBarItem.warningForeground')
+      : new vscode.ThemeColor('statusBarItem.prominentForeground');
     this.statusBarItem.show();
+  }
+
+  /** Call from SyncEngine.onStateChange to update status bar. */
+  public updateSyncState(state: SyncState, pending: number): void {
+    this.syncState = state;
+    this.syncPending = pending;
+    this.render();
   }
 
   public hide() {
