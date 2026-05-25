@@ -4,7 +4,7 @@ const { db } = require('../firebase');
 const { randomUUID } = require('crypto');
 const { callGemini } = require('../services/ai');
 const { explainDiffTemplate, branchSummaryTemplate } = require('../prompts');
-const { typedError, mapError } = require('../lib/errors');
+const { ErrorCodes, typedError, mapError } = require('../lib/errors');
 const { redactText, redactDeep } = require('../lib/redaction');
 const { encrypt, decrypt } = require('../lib/crypto');
 const { auditLog } = require('../middleware/auditLog');
@@ -18,6 +18,73 @@ const {
   searchRules,
   closeEpisodeRules,
 } = require('../middleware/validate');
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Verify that a project belongs to the authenticated user.
+ * Returns the project document reference if valid, or sends a 404/403.
+ */
+async function verifyProjectOwnership(uid, projectId, req, res) {
+  const projectRef = db.collection('users').doc(uid).collection('projects').doc(projectId);
+  const projectDoc = await projectRef.get();
+  if (!projectDoc.exists) {
+    res.status(404).json(
+      typedError(ErrorCodes.RESOURCE_NOT_FOUND, 'Project not found.', { requestId: req.id })
+    );
+    return null;
+  }
+  return projectRef;
+}
+
+/**
+ * Verify that an episode belongs to the authenticated user's project.
+ */
+async function verifyEpisodeOwnership(uid, projectId, episodeId, req, res) {
+  const epRef = db.collection('users').doc(uid).collection('projects').doc(projectId)
+    .collection('episodes').doc(episodeId);
+  const epDoc = await epRef.get();
+  if (!epDoc.exists) {
+    res.status(404).json(
+      typedError(ErrorCodes.RESOURCE_NOT_FOUND, 'Episode not found.', { requestId: req.id })
+    );
+    return null;
+  }
+  return epRef;
+}
+
+/**
+ * Check idempotency key — skip if already processed.
+ * Returns true if this request is a duplicate.
+ */
+async function checkIdempotency(uid, idempotencyKey, req, res) {
+  if (!idempotencyKey) return false;
+
+  const idemRef = db.collection('users').doc(uid).collection('idempotency').doc(idempotencyKey);
+  const idemDoc = await idemRef.get();
+  if (idemDoc.exists) {
+    const cached = idemDoc.data();
+    res.json(cached.response);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Store idempotency key with response for dedup.
+ */
+async function storeIdempotency(uid, idempotencyKey, response) {
+  if (!idempotencyKey) return;
+  try {
+    const idemRef = db.collection('users').doc(uid).collection('idempotency').doc(idempotencyKey);
+    await idemRef.set({
+      response,
+      createdAt: new Date(),
+    });
+  } catch {
+    // Non-critical — don't fail the request
+  }
+}
 
 /**
  * Helper to get provider and API key from UserSettings
@@ -37,7 +104,12 @@ async function getProviderConfig(uid, defaultApiKey) {
       return { provider: provider === 'none' ? 'gemini' : provider, customApiKey };
     }
   } catch (err) {
-    console.warn('Failed to fetch user settings:', err);
+    console.warn(JSON.stringify({
+      severity: 'WARNING',
+      event: 'settings_fetch_failed',
+      uid,
+      error: err.message,
+    }));
   }
   return { provider: 'gemini', customApiKey: defaultApiKey };
 }
@@ -61,6 +133,35 @@ function structuredOrFallback(response, fallback) {
 }
 
 /**
+ * Send a safe error response. Logs internal details, returns clean message.
+ */
+function sendError(res, req, err, fallbackCode) {
+  const mapped = mapError(err, req.id);
+
+  // Log full internal details privately
+  console.error(JSON.stringify({
+    severity: 'ERROR',
+    event: 'api_error',
+    requestId: req.id,
+    uid: req.user?.uid,
+    route: req.originalUrl,
+    errorCode: mapped.code,
+    errorMessage: err.message,
+    stack: process.env.NODE_ENV !== 'production' ? err.stack : undefined,
+  }));
+
+  return res.status(mapped.status).json(
+    typedError(fallbackCode || mapped.code, mapped.message, {
+      requestId: req.id,
+      retryable: mapped.retryable,
+      action: mapped.action,
+    })
+  );
+}
+
+// ── Routes ─────────────────────────────────────────────────────────────────
+
+/**
  * POST /projects/create
  * Creates a new project for the authenticated user.
  * 
@@ -80,10 +181,9 @@ router.post('/projects/create', createProjectRules, async (req, res) => {
     await ref.set({ name, repoUrl: repoUrl || null, localWorkspaceName: localWorkspaceName || null, defaultBranch: defaultBranch || 'main', createdAt: now, updatedAt: now, settings: settings || {} });
     
     auditLog('DATA_WRITE', { action: 'create_project', projectId: id }, req);
-    return res.json({ projectId: id });
+    return res.json({ ok: true, projectId: id });
   } catch (err) {
-    console.error("FULL ERROR:", err);
-    return res.status(500).json(typedError('write_failure', err.stack || err.message));
+    return sendError(res, req, err, ErrorCodes.STORAGE_WRITE_FAILED);
   }
 });
 
@@ -101,21 +201,26 @@ router.post('/episodes/create', createEpisodeRules, async (req, res) => {
   const { projectId, label, branchName } = req.body;
   
   try {
+    // Verify project ownership
+    const projectRef = await verifyProjectOwnership(uid, projectId, req, res);
+    if (!projectRef) return;
+
     const episodeId = randomUUID();
     const now = new Date();
     const epRef = db.collection('users').doc(uid).collection('projects').doc(projectId).collection('episodes').doc(episodeId);
     await epRef.set({ label: label || null, branchName, status: 'open', startedAt: now, endedAt: null, callCount: 0, changedFiles: [], latestDiffHash: null, manualNotes: null });
     
     auditLog('DATA_WRITE', { action: 'create_episode', projectId, episodeId }, req);
-    return res.json({ episodeId });
+    return res.json({ ok: true, episodeId });
   } catch (err) {
-    return res.status(500).json(typedError('write_failure', err.message));
+    return sendError(res, req, err, ErrorCodes.STORAGE_WRITE_FAILED);
   }
 });
 
 /**
  * POST /calls/log
  * Logs a specific AI call or context snapshot within an episode.
+ * Supports idempotency via X-Idempotency-Key header.
  * 
  * @param {express.Request} req - The request object.
  * @param {string} req.body.projectId - The project ID.
@@ -125,13 +230,21 @@ router.post('/episodes/create', createEpisodeRules, async (req, res) => {
  */
 router.post('/calls/log', aiLimiter, logCallRules, async (req, res) => {
   const { uid } = req.user;
-  const payload = req.body;
+  const payload = req.body; 
   const { projectId, episodeId, promptText, modelName, source, modelResponse } = payload;
+  const idempotencyKey = req.headers['x-idempotency-key'] || null;
   
+  // Check idempotency — skip if already processed
+  if (await checkIdempotency(uid, idempotencyKey, req, res)) return;
+
   const skipAI = (source === 'git_commit' || source === 'manual_log');
   const started = Date.now();
   
   try {
+    // Verify ownership
+    const epRef = await verifyEpisodeOwnership(uid, projectId, episodeId, req, res);
+    if (!epRef) return;
+
     let aiResp;
     if (skipAI) {
       // For git commits or manually logged external calls, we don't call Gemini
@@ -144,7 +257,12 @@ router.post('/calls/log', aiLimiter, logCallRules, async (req, res) => {
       // Native AI chat call
       const { provider, customApiKey } = await getProviderConfig(uid, payload.customApiKey);
       if (provider !== 'gemini' && !customApiKey) {
-        throw new Error(`missing_api_key_for_${provider}`);
+        return res.status(400).json(
+          typedError(ErrorCodes.CONFIG_ERROR, `No API key configured for ${provider}. Please configure your provider in settings.`, {
+            requestId: req.id,
+            action: 'none',
+          })
+        );
       }
       aiResp = await callGemini(promptText, modelName || 'gemini-1.5-pro', { customApiKey, provider });
     }
@@ -174,20 +292,22 @@ router.post('/calls/log', aiLimiter, logCallRules, async (req, res) => {
     await callRef.set(callDoc);
 
     // increment episode callCount (retry-safe transaction)
-    const epRef = db.collection('users').doc(uid).collection('projects').doc(projectId).collection('episodes').doc(episodeId);
     await db.runTransaction(async (t) => {
       const snap = await t.get(epRef);
-      if (!snap.exists) throw new Error('episode_not_found');
+      if (!snap.exists) return; // Already verified above, but safety check
       const prev = snap.data().callCount || 0;
       t.update(epRef, { callCount: prev + 1 });
     });
 
+    const responseData = { ok: true, callId, modelName: aiResp.model, modelResponse: aiResp.text, latencyMs: skipAI ? 0 : latencyMs, saved: true };
+
+    // Store idempotency record
+    await storeIdempotency(uid, idempotencyKey, responseData);
+
     auditLog('DATA_WRITE', { action: 'log_call', projectId, episodeId, callId }, req);
-    return res.json({ callId, modelName: aiResp.model, modelResponse: aiResp.text, latencyMs: skipAI ? 0 : latencyMs, saved: true });
+    return res.json(responseData);
   } catch (err) {
-    const mapped = mapError(err);
-    const code = err.message === 'episode_not_found' ? 'invalid_episode' : mapped.code;
-    return res.status(mapped.status).json(typedError(code, mapped.message));
+    return sendError(res, req, err);
   }
 });
 
@@ -206,15 +326,21 @@ router.post('/episodes/explain', aiLimiter, explainRules, async (req, res) => {
   const { projectId, episodeId, diffHash, changedFiles, customApiKey } = req.body;
   
   try {
+    // Verify ownership
+    const epRef = await verifyEpisodeOwnership(uid, projectId, episodeId, req, res);
+    if (!epRef) return;
+
     const cacheRef = db.collection('users').doc(uid).collection('projects').doc(projectId).collection('episodes').doc(episodeId).collection('cache').doc(diffHash);
     const cached = await cacheRef.get();
-    if (cached.exists) return res.json({ fromCache: true, ...cached.data().result });
+    if (cached.exists) return res.json({ ok: true, fromCache: true, ...cached.data().result });
 
     const changedFilesList = (changedFiles || []).join(', ');
     const prompt = explainDiffTemplate({ changedFilesList });
     const { provider, customApiKey: finalApiKey } = await getProviderConfig(uid, customApiKey);
     if (provider !== 'gemini' && !finalApiKey) {
-      throw new Error(`missing_api_key_for_${provider}`);
+      return res.status(400).json(
+        typedError(ErrorCodes.CONFIG_ERROR, `No API key configured for ${provider}.`, { requestId: req.id })
+      );
     }
     const aiResp = await callGemini(prompt, 'gemini-1.5-pro', { responseMimeType: 'application/json', maxOutputTokens: 768, customApiKey: finalApiKey, provider });
     const result = structuredOrFallback(aiResp, (text) => ({ summary: text, risks: [], checks: [] }));
@@ -226,10 +352,9 @@ router.post('/episodes/explain', aiLimiter, explainRules, async (req, res) => {
     await cacheRef.set({ createdAt: new Date(), result: normalized });
     
     auditLog('DATA_ACCESS', { action: 'explain_episode', projectId, episodeId, diffHash }, req);
-    return res.json(normalized);
+    return res.json({ ok: true, ...normalized });
   } catch (err) {
-    const mapped = mapError(err);
-    return res.status(mapped.status).json(typedError('explain_failed', mapped.message));
+    return sendError(res, req, err, ErrorCodes.AI_SERVICE_UNAVAILABLE);
   }
 });
 
@@ -248,15 +373,22 @@ router.post('/branches/summarize', aiLimiter, summarizeRules, async (req, res) =
   const { projectId, branchName, episodes, customApiKey } = req.body;
   
   try {
+    // Verify ownership
+    const projectRef = await verifyProjectOwnership(uid, projectId, req, res);
+    if (!projectRef) return;
+
     const episodesSummaryList = (episodes || []).map((e) => e.episodeSummary || e.label || '').join('\n');
     const prompt = branchSummaryTemplate({ episodesSummaryList });
     const { provider, customApiKey: finalApiKey } = await getProviderConfig(uid, customApiKey);
     if (provider !== 'gemini' && !finalApiKey) {
-      throw new Error(`missing_api_key_for_${provider}`);
+      return res.status(400).json(
+        typedError(ErrorCodes.CONFIG_ERROR, `No API key configured for ${provider}.`, { requestId: req.id })
+      );
     }
     const aiResp = await callGemini(prompt, 'gemini-1.5-pro', { responseMimeType: 'application/json', maxOutputTokens: 1024, customApiKey: finalApiKey, provider });
     const result = structuredOrFallback(aiResp, (text) => ({ pr_summary: text, key_changes: [], review_risks: [] }));
     const responseData = {
+      ok: true,
       pr_summary: result.pr_summary || aiResp.text,
       key_changes: Array.isArray(result.key_changes) ? result.key_changes : [],
       review_risks: Array.isArray(result.review_risks) ? result.review_risks : [],
@@ -265,8 +397,7 @@ router.post('/branches/summarize', aiLimiter, summarizeRules, async (req, res) =
     auditLog('DATA_ACCESS', { action: 'summarize_branch', projectId, branchName }, req);
     return res.json(responseData);
   } catch (err) {
-    const mapped = mapError(err);
-    return res.status(mapped.status).json(typedError('summarize_failed', mapped.message));
+    return sendError(res, req, err, ErrorCodes.AI_SERVICE_UNAVAILABLE);
   }
 });
 
@@ -284,6 +415,10 @@ router.post('/search', searchRules, async (req, res) => {
   const { projectId, q, filters } = req.body;
   
   try {
+    // Verify ownership
+    const projectRef = await verifyProjectOwnership(uid, projectId, req, res);
+    if (!projectRef) return;
+
     // Naive search: look through episodes and calls for matching text in labels, prompts, responses.
     const episodesCol = db.collection('users').doc(uid).collection('projects').doc(projectId).collection('episodes');
     const episodesSnap = await episodesCol.get();
@@ -299,10 +434,9 @@ router.post('/search', searchRules, async (req, res) => {
     }
     
     auditLog('DATA_ACCESS', { action: 'search', projectId, queryLength: q ? q.length : 0 }, req);
-    return res.json(results);
+    return res.json({ ok: true, ...results });
   } catch (err) {
-    const mapped = mapError(err);
-    return res.status(mapped.status).json(typedError('search_failed', mapped.message));
+    return sendError(res, req, err);
   }
 });
 
@@ -320,14 +454,16 @@ router.post('/episodes/close', closeEpisodeRules, async (req, res) => {
   const { projectId, episodeId } = req.body;
   
   try {
-    const epRef = db.collection('users').doc(uid).collection('projects').doc(projectId).collection('episodes').doc(episodeId);
+    // Verify ownership
+    const epRef = await verifyEpisodeOwnership(uid, projectId, episodeId, req, res);
+    if (!epRef) return;
+
     await epRef.update({ status: 'closed', endedAt: new Date() });
     
     auditLog('DATA_WRITE', { action: 'close_episode', projectId, episodeId }, req);
-    return res.json({ closed: true });
+    return res.json({ ok: true, closed: true });
   } catch (err) {
-    const mapped = mapError(err);
-    return res.status(mapped.status).json(typedError('close_failed', mapped.message));
+    return sendError(res, req, err);
   }
 });
 
@@ -342,6 +478,7 @@ router.post('/settings/get', async (req, res) => {
     const settingsDoc = await db.collection('users').doc(uid).collection('settings').doc('global').get();
     if (!settingsDoc.exists) {
       return res.json({
+        ok: true,
         aiProvider: 'none',
         hasGeminiKey: false,
         hasOpenaiKey: false,
@@ -350,13 +487,14 @@ router.post('/settings/get', async (req, res) => {
     }
     const data = settingsDoc.data();
     return res.json({
+      ok: true,
       aiProvider: data.aiProvider || 'none',
       hasGeminiKey: !!data.geminiApiKey,
       hasOpenaiKey: !!data.openaiApiKey,
       hasAnthropicKey: !!data.anthropicApiKey,
     });
   } catch (err) {
-    return res.status(500).json(typedError('settings_read_failed', err.message));
+    return sendError(res, req, err);
   }
 });
 
@@ -371,7 +509,11 @@ router.post('/settings/update', async (req, res) => {
 
   const allowedProviders = ['none', 'gemini', 'openai', 'anthropic'];
   if (aiProvider && !allowedProviders.includes(aiProvider)) {
-    return res.status(400).json(typedError('invalid_provider', `Provider must be one of: ${allowedProviders.join(', ')}`));
+    return res.status(400).json(
+      typedError(ErrorCodes.VALIDATION_ERROR, `Provider must be one of: ${allowedProviders.join(', ')}`, {
+        requestId: req.id,
+      })
+    );
   }
 
   try {
@@ -383,9 +525,9 @@ router.post('/settings/update', async (req, res) => {
 
     await db.collection('users').doc(uid).collection('settings').doc('global').set(update, { merge: true });
     auditLog('SETTINGS_UPDATE', { action: 'update_ai_settings', provider: aiProvider || '(unchanged)' }, req);
-    return res.json({ saved: true });
+    return res.json({ ok: true, saved: true });
   } catch (err) {
-    return res.status(500).json(typedError('settings_write_failed', err.message));
+    return sendError(res, req, err);
   }
 });
 

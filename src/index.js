@@ -11,15 +11,36 @@ const { requestId } = require('./middleware/requestId');
 const { validateEnv } = require('./lib/envCheck');
 const { authLimiter, apiLimiter } = require('./middleware/rateLimiter');
 const { auditLog } = require('./middleware/auditLog');
+const { ErrorCodes, typedError, mapError } = require('./lib/errors');
+const { defineString } = require('firebase-functions/params');
+
+const clientApiKey = defineString('CLIENT_FIREBASE_API_KEY');
+const clientAuthDomain = defineString('CLIENT_FIREBASE_AUTH_DOMAIN');
+const clientProjectId = defineString('CLIENT_FIREBASE_PROJECT_ID');
+
 
 // Validate environment variables on boot
 validateEnv();
 
 const app = express();
+// Trigger redeploy to apply new env vars
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      "script-src": ["'self'", "'unsafe-inline'", "https://www.gstatic.com", "https://apis.google.com"],
+      "script-src-attr": ["'unsafe-inline'"],
+      "style-src": ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      "font-src": ["'self'", "https://fonts.gstatic.com", "https://frontend-cdn.perplexity.ai"],
+      "connect-src": ["'self'", "https://identitytoolkit.googleapis.com", "https://securetoken.googleapis.com", "https://www.googleapis.com", "https://www.gstatic.com"],
+      "frame-src": ["'self'", "https://contextlens-backend-001.firebaseapp.com", "https://*.firebaseapp.com", "https://apis.google.com"],
+      "img-src": ["'self'", "data:", "https://www.gstatic.com"],
+    },
+  },
+}));
 app.use(requestId);
 
 // Enable CORS with restrictive options
@@ -29,7 +50,31 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
-app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+// Structured request logging
+if (process.env.NODE_ENV === 'production') {
+  // JSON structured logs for Cloud Logging
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      console.log(JSON.stringify({
+        severity: res.statusCode >= 500 ? 'ERROR' : res.statusCode >= 400 ? 'WARNING' : 'INFO',
+        event: 'http_request',
+        requestId: req.id,
+        method: req.method,
+        path: req.originalUrl,
+        status: res.statusCode,
+        latencyMs: Date.now() - start,
+        uid: req.user?.uid || null,
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      }));
+    });
+    next();
+  });
+} else {
+  app.use(morgan('dev'));
+}
+
 app.use(bodyParser.json({ limit: '1mb' }));
 
 // Attach a small health route
@@ -185,9 +230,9 @@ app.get('/api/auth/login', async (req, res) => {
         <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"><\/script>
         <script>
           firebase.initializeApp({
-            apiKey: "${process.env.FIREBASE_API_KEY}",
-            authDomain: "${process.env.FIREBASE_AUTH_DOMAIN}",
-            projectId: "${process.env.FIREBASE_PROJECT_ID}",
+            apiKey: "${clientApiKey.value()}",
+            authDomain: "${clientAuthDomain.value()}",
+            projectId: "${clientProjectId.value()}",
           });
 
           const callbackUrl = ${JSON.stringify(callbackUrl)};
@@ -319,14 +364,62 @@ app.use('/', requireAuth, apiLimiter, api);
 // Sentry google-cloud-serverless wraps the exported function, so we do not use setupExpressErrorHandler here.
 /**
  * Global error handler for the Express application.
- * Logs the error and returns a standardized 500 response.
+ * Logs internal details privately, returns sanitized response.
+ * NEVER leaks stack traces, raw error messages, or internal state.
  */
 app.use((err, req, res, next) => {
-  console.error('Unhandled server error:', err);
+  // Log full details privately
+  console.error(JSON.stringify({
+    severity: 'ERROR',
+    event: 'unhandled_server_error',
+    requestId: req.id,
+    uid: req.user?.uid || null,
+    route: req.originalUrl,
+    errorMessage: err.message,
+    stack: process.env.NODE_ENV !== 'production' ? err.stack : undefined,
+  }));
+
   auditLog('VALIDATION_ERROR', { error: err.message, type: 'unhandled_exception' }, req);
+
   if (res.headersSent) return next(err);
-  return res.status(500).json({ error: { code: 'internal_error', message: 'Unexpected server error' } });
+
+  const mapped = mapError(err, req.id);
+  return res.status(mapped.status).json(
+    typedError(mapped.code, mapped.message, {
+      requestId: req.id,
+      retryable: mapped.retryable,
+    })
+  );
 });
+
+// ── Graceful Shutdown ──────────────────────────────────────────────────────
+
+let isShuttingDown = false;
+
+function gracefulShutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  console.log(JSON.stringify({
+    severity: 'INFO',
+    event: 'graceful_shutdown',
+    signal,
+    message: 'Shutting down gracefully...',
+  }));
+
+  // Stop accepting new requests (Cloud Functions handles this,
+  // but useful for local dev with `npm run dev`)
+  setTimeout(() => {
+    console.log(JSON.stringify({
+      severity: 'INFO',
+      event: 'shutdown_complete',
+    }));
+    process.exit(0);
+  }, 5000);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Export as Firebase Function v2
 /**
