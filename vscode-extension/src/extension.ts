@@ -9,9 +9,12 @@ import { Telemetry } from './telemetry';
 import { createHash } from 'crypto';
 import { startWatchers } from './watchers';
 import { ContextLensStatusBar } from './statusBar';
+import { NotificationService } from './NotificationService';
+import { ErrorMapper } from './ErrorMapper';
 
 export function activate(context: vscode.ExtensionContext) {
   Telemetry.log('Extension activated');
+  const notifier = NotificationService.getInstance();
 
   // ── Auth setup (must be FIRST) ───────────────────────────────────────────
 
@@ -53,7 +56,11 @@ export function activate(context: vscode.ExtensionContext) {
     if (existingAuth) {
       // Already signed in → auto-resolve project (only if workspace is open)
       if (vscode.workspace.workspaceFolders?.length) {
-        await EpisodeStore.get().ensureProject();
+        try {
+          await EpisodeStore.get().ensureProject();
+        } catch (err: any) {
+          console.error('[ContextLens] ensureProject failed on activation:', err);
+        }
       }
       statusBar.render();
       stateTreeProvider.refresh();
@@ -72,7 +79,12 @@ export function activate(context: vscode.ExtensionContext) {
   // Re-resolve project after signing in
   authManager.onDidSignIn(async () => {
     if (vscode.workspace.workspaceFolders?.length) {
-      await EpisodeStore.get().ensureProject();
+      try {
+        await EpisodeStore.get().ensureProject();
+      } catch (err: any) {
+        console.error('[ContextLens] ensureProject failed after sign-in:', err);
+        // Do not surface this to the user — sign-in itself succeeded.
+      }
     }
     statusBar.render();
     stateTreeProvider.refresh();
@@ -130,7 +142,7 @@ export function activate(context: vscode.ExtensionContext) {
       });
       if (name) {
         await EpisodeStore.get().createEpisode(name);
-        vscode.window.showInformationMessage(`Started episode: ${name}`);
+        notifier.success(`Episode started: ${name}`);
         Telemetry.log('New Episode Created', { name });
       }
     })
@@ -141,7 +153,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('contextlens.closeEpisode', async () => {
       await EpisodeStore.get().closeEpisode();
-      vscode.window.showInformationMessage('Episode closed');
+      notifier.success('Episode closed.');
       Telemetry.log('Episode Closed');
     })
   );
@@ -155,13 +167,13 @@ export function activate(context: vscode.ExtensionContext) {
       const projectId = store.getProjectId();
 
       if (!episode || !projectId) {
-        vscode.window.showErrorMessage('No active episode. Create one first.');
+        notifier.warning('No active episode. Create one to start tracking.');
         return;
       }
 
       const gitCtx = await GitContext.getContext();
       if (!gitCtx.diff) {
-        vscode.window.showErrorMessage('No diff available to explain.');
+        notifier.info('No diff available to explain yet.');
         return;
       }
 
@@ -211,7 +223,8 @@ export function activate(context: vscode.ExtensionContext) {
 
         Telemetry.log('Explain Diff executed');
       } catch (err: any) {
-        vscode.window.showErrorMessage(`Explain Diff failed: ${err.message}`);
+        const mapped = ErrorMapper.map(err);
+        notifier.fromMapped(mapped);
       }
     })
   );
@@ -224,13 +237,13 @@ export function activate(context: vscode.ExtensionContext) {
       const projectId = store.getProjectId();
 
       if (!projectId) {
-        vscode.window.showErrorMessage('No project detected.');
+        notifier.warning('No project detected. Open a folder to get started.');
         return;
       }
 
       const gitCtx = await GitContext.getContext();
       if (!gitCtx.branch) {
-        vscode.window.showErrorMessage('No branch detected.');
+        notifier.warning('No Git branch detected.');
         return;
       }
 
@@ -247,7 +260,8 @@ export function activate(context: vscode.ExtensionContext) {
         );
         Telemetry.log('Summarize Branch executed');
       } catch (err: any) {
-        vscode.window.showErrorMessage(`Summarize Branch failed: ${err.message}`);
+        const mapped = ErrorMapper.map(err);
+        notifier.fromMapped(mapped);
       }
     })
   );
@@ -283,7 +297,7 @@ export function activate(context: vscode.ExtensionContext) {
       const episode = store.getActiveEpisode();
 
       if (!projectId) {
-        vscode.window.showErrorMessage('No project detected.');
+        notifier.warning('No project detected. Open a folder to get started.');
         return;
       }
 
@@ -305,13 +319,13 @@ export function activate(context: vscode.ExtensionContext) {
       await EpisodeStore.get().forceSync(); // Sync before opening branch
       const projectId = EpisodeStore.get().getProjectId();
       if (!projectId) {
-        vscode.window.showErrorMessage('No project detected.');
+        notifier.warning('No project detected. Open a folder to get started.');
         return;
       }
 
       const gitCtx = await GitContext.getContext();
       if (!gitCtx.branch) {
-        vscode.window.showErrorMessage('No branch detected.');
+        notifier.warning('No Git branch detected.');
         return;
       }
 
@@ -331,7 +345,7 @@ export function activate(context: vscode.ExtensionContext) {
       const projectId = store.getProjectId();
 
       if (!episode || !projectId) {
-        vscode.window.showErrorMessage('No active episode. Create one first.');
+        notifier.warning('No active episode. Create one to start tracking.');
         return;
       }
 
@@ -376,10 +390,11 @@ export function activate(context: vscode.ExtensionContext) {
         });
 
         store.incrementCallCount();
-        vscode.window.showInformationMessage(`External ${tool} call logged to episode "${episode.name}"`);
+        notifier.success(`${tool} call logged to "${episode.name}"`);
         Telemetry.log('External Call Logged', { tool });
       } catch (err: any) {
-        vscode.window.showErrorMessage(`Failed to log external call: ${err.message}`);
+        const mapped = ErrorMapper.map(err);
+        notifier.fromMapped(mapped);
       }
     })
   );
@@ -390,7 +405,9 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('contextlens.configureProvider', async () => {
       const authState = await authManager.loadAuthState();
       if (!authState) {
-        vscode.window.showWarningMessage('Sign in first to configure your AI provider.');
+        notifier.warning('Sign in first to configure your AI provider.', {
+          action: { label: 'Sign In', onAction: () => vscode.commands.executeCommand('contextlens.signIn') },
+        });
         return;
       }
 
@@ -448,7 +465,8 @@ export function activate(context: vscode.ExtensionContext) {
 
           vscode.window.showInformationMessage(`ContextLens: Provider set to ${selectedProvider}${apiKey ? ' with new API key' : ''} ✦`);
         } catch (err: any) {
-          vscode.window.showErrorMessage(`Failed to save provider settings: ${err.message}`);
+          const mapped = ErrorMapper.map(err);
+          notifier.fromMapped(mapped);
           return;
         }
       } else {
@@ -456,7 +474,8 @@ export function activate(context: vscode.ExtensionContext) {
           await ApiClient.updateSettings({ aiProvider: 'none' });
           vscode.window.showInformationMessage('ContextLens: Using default server-side Gemini ✦');
         } catch (err: any) {
-          vscode.window.showErrorMessage(`Failed to save provider settings: ${err.message}`);
+          const mapped = ErrorMapper.map(err);
+          notifier.fromMapped(mapped);
           return;
         }
       }

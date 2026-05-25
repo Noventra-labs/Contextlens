@@ -92,11 +92,13 @@
     "views": {
       "contextlens-explorer": [
         {
+          "icon":"resources/state-header.svg",
           "id": "contextlens.stateTree",
           "name": "State Header",
           "type": "tree"
         },
         {
+          "icon":"resources/chat-icon.svg",
           "id": "contextlens.chatView",
           "name": "AI Chat",
           "type": "webview"

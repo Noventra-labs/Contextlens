@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <rect width="128" height="128" rx="22" fill="#0D1117"/>
+  <!-- Outer eye shape -->
+  <path d="M16 64 C32 36, 96 36, 112 64 C96 92, 32 92, 16 64 Z" fill="none" stroke="#4ECDC4" stroke-width="2.8"/>
+  <!-- Iris -->
+  <circle cx="64" cy="64" r="18" fill="none" stroke="#4ECDC4" stroke-width="2.2"/>
+  <!-- Stacked layers inside lens — 3 thin horizontal bars -->
+  <rect x="52" y="58" width="24" height="3" rx="1.5" fill="#4ECDC4" opacity="0.9"/>
+  <rect x="52" y="63" width="24" height="3" rx="1.5" fill="#4ECDC4" opacity="0.6"/>
+  <rect x="52" y="68" width="24" height="3" rx="1.5" fill="#4ECDC4" opacity="0.35"/>
+  <!-- Pupil dot -->
+  <circle cx="64" cy="64" r="3.5" fill="#4ECDC4"/>
+  <!-- Eye lash marks top -->
+  <line x1="64" y1="40" x2="64" y2="46" stroke="#4ECDC4" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
+  <line x1="78" y1="43" x2="76" y2="49" stroke="#4ECDC4" stroke-width="2" stroke-linecap="round" opacity="0.3"/>
+  <line x1="50" y1="43" x2="52" y2="49" stroke="#4ECDC4" stroke-width="2" stroke-linecap="round" opacity="0.3"/>
+</svg>
