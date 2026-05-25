@@ -185,9 +185,19 @@ program
   .command('init')
   .description('Initialize ContextLens in the current directory')
   .argument('[project-id]', 'Your ContextLens Project ID')
-  .action((projectId) => {
+  .option('--dry-run', 'Show what would be done without making changes')
+  .action((projectId, options) => {
     try {
       const configDir = path.join(process.cwd(), PROJECT_CONFIG_DIR);
+      
+      if (options.dryRun) {
+        console.log('🔍 Dry Run — no changes will be made:');
+        console.log(`   Would create directory: ${PROJECT_CONFIG_DIR}/`);
+        if (projectId) console.log(`   Would set Project ID: ${projectId}`);
+        else console.log('   Would create empty config (no Project ID).');
+        return;
+      }
+
       ensureDir(configDir);
       
       const configData = {};
@@ -323,16 +333,43 @@ program
     const config = loadConfig();
     const token = options.token || config.token;
     const projectId = options.projectId || config.projectId;
-    const episodeId = options.episodeId || config.episodeId;
+    let episodeId = options.episodeId || config.episodeId;
 
     if (!token) {
       console.error('❌ Error: No authentication token found. Run "cl auth <token>" first.');
       process.exit(1);
     }
-    if (!projectId || !episodeId) {
-      console.error('❌ Error: Missing Project ID or Episode ID.');
-      console.log('   Use options --project-id and --episode-id or run "cl init" and configure them.');
+    if (!projectId) {
+      console.error('❌ Error: Missing Project ID. Run "cl init <project-id>" or use --project-id.');
       process.exit(1);
+    }
+
+    // Phase 3: Auto-create an episode if none is configured
+    if (!episodeId) {
+      console.log('ℹ️  No active episode found. Auto-creating one...');
+      const now = new Date();
+      const label = `CLI Session ${now.toISOString().slice(0, 10)}`;
+      try {
+        // Determine branch name from git (best-effort)
+        let branchName = 'main';
+        try {
+          branchName = require('child_process').execSync('git rev-parse --abbrev-ref HEAD', { stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim() || 'main';
+        } catch { /* no git, use default */ }
+
+        const created = await apiRequest('/episodes/create', 'POST', {
+          projectId,
+          label,
+          branchName,
+        }, token, config.apiBaseUrl);
+
+        episodeId = created.episodeId;
+        saveConfig({ episodeId }, false);
+        console.log(`✅ Episode created: "${label}" (ID: ${episodeId})`);
+      } catch (err) {
+        console.error(`❌ Failed to auto-create episode: ${err.message}`);
+        console.log('   Use --episode-id to specify an existing episode.');
+        process.exit(1);
+      }
     }
 
     try {
@@ -405,13 +442,28 @@ program
 program
   .command('sync')
   .description('Verify connectivity and sync project status')
-  .action(async () => {
+  .option('--dry-run', 'Check connectivity without syncing')
+  .action(async (options) => {
     const config = loadConfig();
     console.log('🔄 ContextLens Sync');
     console.log('==================');
     
     if (!config.token) {
       console.error('❌ Error: No authentication token found.');
+      return;
+    }
+
+    // Validate token format before making requests
+    if (config.token.length < 20) {
+      console.error('❌ Error: Token appears malformed (too short). Run "cl auth <token>" to set a valid token.');
+      return;
+    }
+
+    if (options.dryRun) {
+      console.log('🔍 Dry Run — would sync with:');
+      console.log(`   API: ${config.apiBaseUrl}`);
+      console.log(`   Project: ${config.projectId || '(none)'}`);
+      console.log(`   Token: ****${config.token.slice(-5)}`);
       return;
     }
 
@@ -433,7 +485,13 @@ program
       console.log('✅ Local configuration is up to date.');
     } catch (err) {
       process.stdout.write('Failed.\n');
-      console.error(`❌ Sync failed: ${err.message}`);
+      if (err.message.includes('401') || err.message.includes('403')) {
+        console.error('❌ Authentication failed. Your token may be expired. Run "cl auth <new-token>".');
+      } else if (err.message.includes('ECONNREFUSED') || err.message.includes('ENOTFOUND')) {
+        console.error('❌ Network error. Check your internet connection.');
+      } else {
+        console.error(`❌ Sync failed: ${err.message}`);
+      }
     }
   });
 
