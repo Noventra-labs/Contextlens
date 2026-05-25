@@ -2,17 +2,20 @@ const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 
 /**
  * Rate limiter for general API endpoints.
- * Allows 100 requests per 15-minute window per IP.
+ * Allows 100 requests per 15-minute window per user (or IP if unauthenticated).
  */
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
-  standardHeaders: true,
+  standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: {
+    ok: false,
     error: {
-      code: 'rate_limit_exceeded',
-      message: 'Too many requests. Please try again later.',
+      code: 'RATE_LIMITED',
+      message: 'Too many requests right now. Trying again shortly.',
+      retryable: true,
+      action: 'retry',
     },
   },
   keyGenerator: (req, res) => req.user?.uid || ipKeyGenerator(req, res),
@@ -25,12 +28,15 @@ const apiLimiter = rateLimit({
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
-  standardHeaders: true,
+  standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: {
+    ok: false,
     error: {
-      code: 'rate_limit_exceeded',
+      code: 'RATE_LIMITED',
       message: 'Too many authentication attempts. Please try again later.',
+      retryable: true,
+      action: 'retry',
     },
   },
 });
@@ -42,12 +48,15 @@ const authLimiter = rateLimit({
 const aiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 30,
-  standardHeaders: true,
+  standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: {
+    ok: false,
     error: {
-      code: 'rate_limit_exceeded',
+      code: 'RATE_LIMITED',
       message: 'AI request quota exceeded. Please try again later.',
+      retryable: true,
+      action: 'retry',
     },
   },
   keyGenerator: (req, res) => req.user?.uid || ipKeyGenerator(req, res),
