@@ -119,7 +119,7 @@ export function SettingsPage() {
               </div>
             </div>
             <a
-              href={`https://contextlens-backend-001.web.app/api/auth/login?uid=${user?.uid}&callback=vscode://noventra-Labs.contextlens`}
+              href={`https://contextlens-backend-001.web.app/api/auth/login?uid=${user?.uid}&callback=vscode://ContextLens.contextlens`}
               className="flex items-center gap-2 px-4 py-2 rounded-md bg-primary text-black text-sm font-bold hover:opacity-90 transition-opacity"
             >
               Connect VS Code

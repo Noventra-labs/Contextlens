@@ -18,7 +18,7 @@ export const SetupPage = memo(function SetupPage() {
       icon: <Code className="w-5 h-5 text-primary" />,
       action: (
         <a
-          href="vscode:extension/noventra-Labs.contextlens"
+          href="vscode:extension/ContextLens.contextlens"
           className="inline-flex items-center gap-2 text-xs font-bold text-primary hover:underline"
         >
           Open in VS Code <ExternalLink className="w-3 h-3" />
@@ -31,7 +31,7 @@ export const SetupPage = memo(function SetupPage() {
       icon: <CheckCircle2 className="w-5 h-5 text-primary" />,
       action: (
         <a
-          href={`https://contextlens-backend-001.web.app/api/auth/login?uid=${user?.uid}&callback=vscode://noventra-Labs.contextlens`}
+          href={`https://contextlens-backend-001.web.app/api/auth/login?uid=${user?.uid}&callback=vscode://ContextLens.contextlens`}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-black text-sm font-bold hover:opacity-90 transition-opacity"
         >
           Connect VS Code
