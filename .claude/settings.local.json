@@ -16,7 +16,8 @@
       "Bash(\"/c/Program Files/nodejs/npx.cmd\" tsc --noEmit)",
       "Bash(PATH=\"/c/Program Files/nodejs:$PATH\" /c/Program Files/nodejs/npx.cmd tsc *)",
       "Bash(\"/c/Program Files/nodejs/npm.cmd\" install --save-dev typescript)",
-      "Bash(/c/Program Files/nodejs/npx.cmd tsc *)"
+      "Bash(/c/Program Files/nodejs/npx.cmd tsc *)",
+      "Bash(python *)"
     ]
   }
 }
