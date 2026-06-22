@@ -13,6 +13,7 @@ const EpisodeDetailPage = lazy(() => import('../pages/EpisodeDetailPage').then(m
 const BranchPage = lazy(() => import('../pages/BranchPage').then(m => ({ default: m.BranchPage })))
 const SettingsPage = lazy(() => import('../pages/SettingsPage').then(m => ({ default: m.SettingsPage })))
 const SetupPage = lazy(() => import('../pages/SetupPage').then(m => ({ default: m.SetupPage })))
+const SearchPage = lazy(() => import('../pages/SearchPage').then(m => ({ default: m.SearchPage })))
 const NotFoundPage = lazy(() => import('../pages/NotFoundPage').then(m => ({ default: m.NotFoundPage })))
 
 function PageLoader() {
@@ -72,6 +73,10 @@ const router = createBrowserRouter([
           {
             path: 'setup',
             element: <SetupPage />,
+          },
+          {
+            path: 'search',
+            element: <SearchPage />,
           },
         ],
       },
