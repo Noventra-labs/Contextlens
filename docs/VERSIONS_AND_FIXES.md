@@ -189,29 +189,29 @@ Firebase Auth's `currentUser` persists in `localStorage` (browser) but VS Code e
 | :--- | :--- | :--- | :--- |
 | **ENH-001** | Smart Episode Naming | Auto-generate episode names from the branch name + last commit message instead of requiring manual input (e.g., `feat/login → "Login Flow — add OAuth provider"`). | ✅ Shipped |
 | **ENH-002** | Diff Size Guard | Before sending a diff to the sync engine, auto-truncate to 6,000 chars and log a warning if truncation occurred. Prevents silent large-payload failures. | ✅ Shipped |
-| **ENH-003** | Context Snapshot on Close | When an episode is auto-closed by the branch watcher, capture a final snapshot: open files, cursor positions, last terminal command. Restore on next open. | Medium |
-| **ENH-004** | Multi-Root Workspace Support | Detect and handle VS Code multi-root workspaces — create separate projects per root, not one project for the entire workspace. | Medium |
-| **ENH-005** | Episode Time Estimates | Track time between episode open and close. Show "Active for 2h 15m" in the sidebar and dashboard for productivity insights. | Low |
+| **ENH-003** | Context Snapshot on Close | When an episode is auto-closed by the branch watcher, capture a final snapshot: open files, cursor positions, last terminal command. Restore on next open. | ✅ Shipped |
+| **ENH-004** | Multi-Root Workspace Support | Detect and handle VS Code multi-root workspaces — create separate projects per root, not one project for the entire workspace. | ✅ Shipped |
+| **ENH-005** | Episode Time Estimates | Track time between episode open and close. Show "Active for 2h 15m" in the sidebar and dashboard for productivity insights. | ✅ Shipped |
 | **ENH-006** | Stale Episode Detector | Flag episodes that have been open for >24 hours with no file saves or commits. Auto-prompt: "This episode looks stale — close it?" | ✅ Shipped |
 
 ### Dashboard Enhancements
 
 | ID | Feature | Description | Priority |
 | :--- | :--- | :--- | :--- |
-| **ENH-007** | Episode Timeline View | Visual timeline of all episodes per project (Gantt-style), showing which branches were active, when, and for how long. | High |
-| **ENH-008** | Diff Viewer | Inline syntax-highlighted diff viewer for each Call, so developers can review what code was captured without leaving the dashboard. | High |
-| **ENH-009** | AI Call Cost Tracker | Show cumulative Gemini API token usage and estimated cost per project/episode. Helps developers stay aware of spend without surprises. | Medium |
-| **ENH-010** | Export to Markdown | One-click export of an episode's full context (commits, diffs, AI calls, notes) as a formatted Markdown file — useful for PR descriptions or post-mortems. | Medium |
-| **ENH-011** | Search Across Episodes | Full-text search across all episodes and calls within a project. Critical as data volume grows. | High |
+| **ENH-007** | Episode Timeline View | Visual timeline of all episodes per project (Gantt-style), showing which branches were active, when, and for how long. | ✅ Shipped |
+| **ENH-008** | Diff Viewer | Inline syntax-highlighted diff viewer for each Call, so developers can review what code was captured without leaving the dashboard. | ✅ Shipped |
+| **ENH-009** | AI Call Cost Tracker | Show cumulative Gemini API token usage and estimated cost per project/episode. Helps developers stay aware of spend without surprises. | ✅ Shipped |
+| **ENH-010** | Export to Markdown | One-click export of an episode's full context (commits, diffs, AI calls, notes) as a formatted Markdown file — useful for PR descriptions or post-mortems. | ✅ Shipped |
+| **ENH-011** | Search Across Episodes | Full-text search across all episodes and calls within a project. Critical as data volume grows. | ✅ Shipped |
 
 ### Architecture / Backend Enhancements
 
 | ID | Feature | Description | Priority |
 | :--- | :--- | :--- | :--- |
-| **ENH-012** | Token Refresh Endpoint | Add a `/auth/refresh` Cloud Function that verifies a stored token and returns a fresh one. Removes dependency on the Firebase client SDK for token refresh in the extension. | High |
-| **ENH-013** | Rate Limiting on AI Endpoints | Add per-user rate limiting on Gemini-powered endpoints (e.g., max 20 calls/hour). Prevents accidental cost overruns if button-click rule is ever bypassed. | High |
-| **ENH-014** | Payload Validation Middleware | Add Zod schemas for all incoming payloads to Cloud Functions. Currently, malformed payloads fail silently. | Medium |
-| **ENH-015** | Firestore Write Batching at Backend | Even if the sync engine sends data correctly, batch Firestore writes at the Cloud Function level using `writeBatch()` to reduce write costs at scale. | Low |
+| **** | Token Refresh | Extension AuthManager proactively checks JWT claim and refreshes token every 45 minutes; coordinateRefresh mutex handles concurrency. | ✅ Shipped |
+| **** | Rate Limiting | Backend limits all AI-powered routes via `aiLimiter` (30/15min) to prevent accidental quota usage. | ✅ Shipped |
+| **** | Payload Validation | Backend validates all endpoint request schemas via `express-validator` middleware. | ✅ Shipped |
+| **ENH-015** | Firestore Write Batching | Refactored `/calls/log` to use `db.batch()` to write the call document and increment `callCount` in one operation. | ✅ Shipped |
 
 ***
 
