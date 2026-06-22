@@ -7,14 +7,13 @@
 > [!WARNING]
 > **ContextLens is currently under active development.** Some features and integrations are in preview states, and certain functions may not work as expected or change without notice. Please use with caution in production workspaces.
 
-ContextLens is an AI-driven developer companion that captures your coding intent, tracks development "episodes," and provides high-level project insights through a unified dashboard and CLI. It ensures that the *why* behind every change is never lost.
+ContextLens is an AI-driven developer companion that captures your coding intent, tracks development "episodes," and provides high-level project insights through a unified dashboard. It ensures that the *why* behind every change is never lost.
 
 ## 🌟 Features
 
 - **Episode-Based Tracking**: Organize your work into logical episodes (features, bugfixes, refactors).
 - **AI-Powered Context**: Automatically captures diffs and AI interactions to build a semantic history of your project.
 - **Visual Timeline**: A premium web dashboard to visualize project progress across branches.
-- **Command Line Interface (cl)**: A powerful CLI to interact with ContextLens directly from your terminal.
 - **Smart Summaries**: Automatically generate PR descriptions and branch-level impact assessments using Gemini.
 - **Offline-First Sync**: A robust sync engine in the VS Code extension ensures no context is lost, even without a connection.
 
@@ -24,7 +23,6 @@ This monorepo contains the following components:
 
 | Component | Path | Description |
 |---|---|---|
-| **CLI Tool (cl)** | [`/cli`](./cli/) | The standalone terminal interface. |
 | **VS Code Extension** | [`/vscode-extension`](./vscode-extension/) | The primary client for context capture. |
 | **Web Dashboard** | [`/contextlens-dashboard`](./contextlens-dashboard/) | React-based visual interface for project insights. |
 | **Backend** | [`/src`](./src/) | Firebase Cloud Functions + Firestore for data processing. |
@@ -37,17 +35,6 @@ This monorepo contains the following components:
 - [Node.js](https://nodejs.org/) (v18 or higher)
 - [Firebase CLI](https://firebase.google.com/docs/cli)
 - Google Cloud Platform account with Vertex AI enabled.
-
-### CLI Setup
-
-The quickest way to interact with ContextLens is via the CLI:
-
-```bash
-cd cli
-npm install -g .
-# Now use the 'cl' command
-cl status
-```
 
 ### Development Setup
 
@@ -71,7 +58,6 @@ cl status
 ## 📘 Documentation
 
 - [Getting Started Guide](./docs/DOCUMENTATION.md)
-- [CLI Reference](./cli/README.md)
 - [Versions & Fixes History](./docs/VERSIONS_AND_FIXES.md)
 - [Technical Workflows](./docs/WORKFLOW_AND_PROCESSES.md)
 - [Architecture Overview](./docs/ARCHITECTURE.md)

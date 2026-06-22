@@ -46,7 +46,12 @@ export class AuthManager implements vscode.UriHandler {
 
   private signInResolver: ((value: { uid: string; token: string }) => void) | null = null;
 
-  constructor(private context: vscode.ExtensionContext) {}
+  // B2: Proactive token-refresh timer.
+  private proactiveRefreshTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor(private context: vscode.ExtensionContext) {
+    this.startProactiveRefresh();
+  }
 
   // ── URI Handler ────────────────────────────────────────────────────────────
 
@@ -293,8 +298,17 @@ export class AuthManager implements vscode.UriHandler {
   /**
    * Attempt to refresh the ID token using the stored refresh token.
    * Returns true if refresh succeeded, false otherwise.
+   * Concurrent callers are coalesced via `coordinateRefresh` so that
+   * N parallel 401 retries trigger only one network call.
    */
-  async tryRefreshToken(): Promise<boolean> {
+  tryRefreshToken(): Promise<boolean> {
+    return coordinateRefresh(() => this.attemptRefresh());
+  }
+
+  /**
+   * Internal: performs a single refresh attempt. Wrapped by coordinateRefresh.
+   */
+  private async attemptRefresh(): Promise<boolean> {
     try {
       let currentRefreshToken = await this.context.secrets.get(SECRET_REFRESH_TOKEN_KEY);
 
@@ -346,6 +360,74 @@ export class AuthManager implements vscode.UriHandler {
       vscode.commands.executeCommand('contextlens.signIn');
     }
   }
+
+  // ── B2: Proactive refresh ────────────────────────────────────────────────
+
+  /**
+   * Decode the `exp` claim from a Firebase ID token without verifying
+   * the signature (the server will do that on the next request).
+   * Returns the expiry timestamp in ms, or null if unparseable.
+   */
+  private decodeTokenExpiryMs(idToken: string): number | null {
+    try {
+      const parts = idToken.split('.');
+      if (parts.length !== 3) return null;
+      // base64url → base64
+      const padded = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const padding = '='.repeat((4 - (padded.length % 4)) % 4);
+      const json = Buffer.from(padded + padding, 'base64').toString('utf8');
+      const payload = JSON.parse(json);
+      return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Periodic timer that proactively refreshes the ID token before it
+   * expires, so long-idle sessions don't accumulate 401 errors. Driven by
+   * `contextlens.tokenRefreshMinutes` (default 45, max 55 — under the
+   * 60-minute Firebase ID token TTL).
+   */
+  private startProactiveRefresh(): void {
+    if (this.proactiveRefreshTimer) return;
+
+    const minutes = vscode.workspace.getConfiguration('contextlens').get<number>('tokenRefreshMinutes', 45);
+    const intervalMs = Math.max(5, Math.min(55, minutes)) * 60_000;
+
+    this.proactiveRefreshTimer = setInterval(async () => {
+      try {
+        const idToken = await this.getIdToken();
+        if (!idToken) return; // signed out — nothing to refresh
+
+        const expMs = this.decodeTokenExpiryMs(idToken);
+        if (expMs === null) return;
+
+        const remainingMs = expMs - Date.now();
+        // Refresh if < 15 minutes remaining (gives margin for retries).
+        if (remainingMs < 15 * 60_000) {
+          console.log(`[ContextLens] Proactive token refresh — ${Math.round(remainingMs / 1000)}s until expiry.`);
+          // No-await on purpose — coordinator handles concurrency.
+          this.tryRefreshToken().catch((err) => {
+            console.warn('[ContextLens] Proactive refresh failed:', err);
+          });
+        }
+      } catch (err) {
+        console.warn('[ContextLens] Proactive refresh check failed:', err);
+      }
+    }, intervalMs);
+  }
+
+  /**
+   * Stops the proactive refresh timer. Called from the extension's
+   * deactivate hook.
+   */
+  stopProactiveRefresh(): void {
+    if (this.proactiveRefreshTimer) {
+      clearInterval(this.proactiveRefreshTimer);
+      this.proactiveRefreshTimer = null;
+    }
+  }
 }
 
 // ── Singleton accessor (set from extension.ts) ────────────────────────────
@@ -361,4 +443,60 @@ export function getAuthManager(): AuthManager {
     throw new Error('AuthManager not initialized. Call setAuthManager() in activate().');
   }
   return _authManager;
+}
+
+// ── Refresh coordinator (B3) ──────────────────────────────────────────────
+// Coordinates concurrent token refresh attempts so that N simultaneous 401s
+// collapse to 1 underlying refreshIdToken() call. All callers awaiting the
+// in-flight refresh get the same result.
+
+let _isRefreshing = false;
+let _pendingWaiters: Array<(succeeded: boolean) => void> = [];
+
+const REFRESH_TIMEOUT_MS = 10_000;
+
+/**
+ * Ensures that only one token refresh runs at a time. Concurrent callers
+ * wait for the in-flight refresh to complete and receive its result.
+ *
+ * @param doRefresh Async function that performs the actual refresh.
+ * @returns true if the refresh succeeded, false otherwise.
+ */
+export async function coordinateRefresh(doRefresh: () => Promise<boolean>): Promise<boolean> {
+  if (_isRefreshing) {
+    // Join the queue with a safety timeout so a hung refresh doesn't deadlock.
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        console.warn('[ContextLens] Refresh coordinator timed out after 10s — failing fast.');
+        resolve(false);
+      }, REFRESH_TIMEOUT_MS);
+
+      _pendingWaiters.push((succeeded) => {
+        clearTimeout(timer);
+        resolve(succeeded);
+      });
+    });
+  }
+
+  _isRefreshing = true;
+  try {
+    const succeeded = await doRefresh();
+    // Notify all waiters
+    const waiters = _pendingWaiters;
+    _pendingWaiters = [];
+    for (const w of waiters) {
+      try { w(succeeded); } catch { /* don't let one bad waiter poison the rest */ }
+    }
+    return succeeded;
+  } catch (err) {
+    // Refresh threw — fail all waiters
+    const waiters = _pendingWaiters;
+    _pendingWaiters = [];
+    for (const w of waiters) {
+      try { w(false); } catch { /* ignore */ }
+    }
+    throw err;
+  } finally {
+    _isRefreshing = false;
+  }
 }

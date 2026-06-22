@@ -3,13 +3,24 @@ import { EpisodeStore } from './episodeStore';
 import { getAuthManager } from './auth';
 import { ApiClient } from './apiClient';
 import { GitContext } from './gitContext';
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 
 let server: http.Server | null = null;
 const PORT = 3012;
 
+// Fix 4: Generate a per-session local secret for MCP auth.
+// Only the bridge process (which reads this secret) can make requests.
+let localSecret: string = '';
+
+export function getMcpSecret(): string {
+  return localSecret;
+}
+
 export function startMcpServer() {
   if (server) return;
+
+  // Fix 4: Generate a random secret for this session
+  localSecret = randomBytes(32).toString('hex');
 
   server = http.createServer(async (req, res) => {
     // Enable JSON responses
@@ -18,11 +29,19 @@ export function startMcpServer() {
     // CORS headers for safety
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-MCP-Secret');
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
+      return;
+    }
+
+    // Fix 4: Validate local secret on every request
+    const requestSecret = req.headers['x-mcp-secret'] as string;
+    if (!requestSecret || requestSecret !== localSecret) {
+      res.writeHead(401);
+      res.end(JSON.stringify({ error: 'Unauthorized — invalid or missing MCP secret' }));
       return;
     }
 
@@ -32,7 +51,8 @@ export function startMcpServer() {
       if (req.method === 'GET' && url.pathname === '/status') {
         const store = EpisodeStore.get();
         const authManager = getAuthManager();
-        const token = authManager ? await authManager.getIdToken() : null;
+        // Fix 3: Never expose raw tokens. Return auth state only.
+        const isAuthenticated = authManager ? !!(await authManager.getIdToken()) : false;
 
         res.writeHead(200);
         res.end(JSON.stringify({
@@ -40,7 +60,7 @@ export function startMcpServer() {
           episodeId: store.getActiveEpisode()?.id || null,
           projectName: store.getProjectName(),
           activeEpisodeName: store.getActiveEpisode()?.name || null,
-          token: token
+          authenticated: isAuthenticated
         }));
         return;
       }
@@ -115,6 +135,78 @@ export function startMcpServer() {
           changedFiles: episode.changedFiles
         });
 
+        res.writeHead(200);
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/search') {
+        const body = await getBody(req);
+        const store = EpisodeStore.get();
+        const projectId = store.getProjectId();
+        if (!projectId) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: 'No active project' }));
+          return;
+        }
+        const result = await ApiClient.post('/search', {
+          projectId,
+          q: body.q || ''
+        });
+        res.writeHead(200);
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/get-episode') {
+        const body = await getBody(req);
+        const store = EpisodeStore.get();
+        const projectId = store.getProjectId();
+        if (!projectId || !body.episodeId) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: 'projectId and episodeId are required' }));
+          return;
+        }
+        const result = await ApiClient.post('/episodes/get', {
+          projectId,
+          episodeId: body.episodeId
+        });
+        res.writeHead(200);
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/list-episodes') {
+        const body = await getBody(req);
+        const store = EpisodeStore.get();
+        const projectId = store.getProjectId();
+        if (!projectId) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: 'No active project' }));
+          return;
+        }
+        const result = await ApiClient.post('/episodes/list', {
+          projectId,
+          limit: body.limit
+        });
+        res.writeHead(200);
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/explain-past-changes') {
+        const body = await getBody(req);
+        const store = EpisodeStore.get();
+        const projectId = store.getProjectId();
+        if (!projectId || !body.episodeId) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: 'projectId and episodeId are required' }));
+          return;
+        }
+        const result = await ApiClient.post('/episodes/explain', {
+          projectId,
+          episodeId: body.episodeId
+        });
         res.writeHead(200);
         res.end(JSON.stringify(result));
         return;

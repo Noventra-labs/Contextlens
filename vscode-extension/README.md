@@ -4,7 +4,7 @@ ContextLens is a powerful AI-driven developer companion that captures your codin
 
 ---
 
-## 🎨 VS Code UI & Integration
+##  VS Code UI & Integration
 
 The extension integrates tightly into your VS Code workspace to provide a distraction-free context tracking environment:
 
@@ -15,23 +15,23 @@ The extension integrates tightly into your VS Code workspace to provide a distra
 
 ---
 
-## ⚡ Extension Features
+## Extension Features
 
-### 🚀 Episode-Based Intent Tracking
+### Episode-Based Intent Tracking
 Organize your coding context cleanly by starting discrete tracking episodes. Grouping changes by feature branch or specific task ensures clean history and accurate summaries.
 
-### 🧠 AI-Powered Context Capture
+###  AI-Powered Context Capture
 Automatically captures file diffs and active file context during AI assistant interactions, tracking code changes and intent continuously.
 
-### 🔐 Seamless Auth Sync
+###  Seamless Auth Sync
 Integrated authentication utilizing secure callbacks (`vscode://Noventra-Labs.contextlens`) connecting Firebase Auth directly from the web dashboard.
 
-### 📊 Deep Dashboard Integration
+###  Deep Dashboard Integration
 Instant navigation hooks to open your specific projects, active branches, or episodes directly in the web dashboard for deep timeline inspection.
 
 ---
 
-## ⌨️ Keyboard Shortcuts & Keybindings
+## ⌨ Keyboard Shortcuts & Keybindings
 
 Quickly manage your tracking states without leaving your code editor using global shortcuts:
 
@@ -44,7 +44,7 @@ Quickly manage your tracking states without leaving your code editor using globa
 
 ---
 
-## 🛠️ Configuration Settings
+##  Configuration Settings
 
 Configure extension behaviors through the standard VS Code Settings (`Ctrl+,`):
 
@@ -52,10 +52,38 @@ Configure extension behaviors through the standard VS Code Settings (`Ctrl+,`):
     Enable global keyboard shortcuts for starting and ending episodes.
 *   **`contextlens.apiUrl`** (`string`, default: `https://us-central1-contextlens-backend-001.cloudfunctions.net/api`):
     The base URL pointing to your ContextLens backend APIs.
+*   **`contextlens.firebaseApiKey`** (`string`, default: empty):
+    Firebase Web API key used for custom-token exchange and token refresh.
+    **Leave blank in published builds.** Set this in your VS Code `settings.json`
+    only for local development. Production builds inject the key at build time
+    via the `FIREBASE_API_KEY` environment variable (see "Building" below).
+*   **`contextlens.tokenRefreshMinutes`** (`number`, default: `45`, range: `5–55`):
+    How often the extension proactively refreshes the Firebase ID token.
+    Must stay under the 60-minute Firebase ID-token TTL.
 
 ---
 
-## 📦 Command Palette Commands (`Ctrl+Shift+P` / `Cmd+Shift+P`)
+## Building
+
+Production `.vsix` packages require a Firebase Web API key at build time. Set
+the `FIREBASE_API_KEY` environment variable before running `npm run package`:
+
+```bash
+# In a `.env.production` file (gitignored), or:
+export FIREBASE_API_KEY="AIza…"
+npm run package
+```
+
+Webpack's `DefinePlugin` inlines the value as `__FIREBASE_API_KEY__` in the
+bundled output. If the variable is unset, the build prints a warning and the
+bundled extension will throw on sign-in until the key is provided via
+`contextlens.firebaseApiKey` in VS Code settings (dev only).
+
+---
+
+
+
+##  Command Palette Commands (`Ctrl+Shift+P` / `Cmd+Shift+P`)
 
 Access the full suite of ContextLens utilities from the VS Code command line:
 
@@ -70,14 +98,14 @@ Access the full suite of ContextLens utilities from the VS Code command line:
 
 ---
 
-## 🏷️ Extension Metadata
+##  Extension Metadata
 
 *   **Categories:** `Programming Languages`, `Data Science`, `Machine Learning`
 *   **Keywords:** `ai`, `context`, `gemini`, `tracking`, `developer-productivity`
 
 ---
 
-## 🧑‍💻 Development Guide
+##  Development Guide
 
 If you are contributing to or testing the extension:
 
@@ -106,6 +134,6 @@ npm run package
 
 ---
 
-## 📄 License
+## License
 
 MIT © ContextLens

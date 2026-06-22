@@ -202,7 +202,7 @@ function mapError(err, requestId) {
     code = ErrorCodes.AUTH_EXPIRED;
   } else if (/permission|forbidden/i.test(raw)) {
     code = ErrorCodes.PERMISSION_DENIED;
-  } else if (/not[_ -]?found|no such document|episode_not_found/i.test(raw)) {
+  } else if (/not[_ -]?found|no such document|episode_not_found|file missing/i.test(raw)) {
     code = ErrorCodes.RESOURCE_NOT_FOUND;
   } else if (/timeout|timed?\s*out|model_timeout/i.test(raw)) {
     code = ErrorCodes.NETWORK_TIMEOUT;

@@ -67,6 +67,20 @@ export function SettingsPage() {
     }
   }, [user, aiProvider, apiKeys])
 
+  const [copiedToken, setCopiedToken] = useState(false)
+
+  const handleCopyCliToken = useCallback(async () => {
+    if (!user) return
+    try {
+      const token = await user.getIdToken()
+      await navigator.clipboard.writeText(token)
+      setCopiedToken(true)
+      setTimeout(() => setCopiedToken(false), 2000)
+    } catch (err) {
+      console.error('Failed to copy token', err)
+    }
+  }, [user])
+
   const showKeyInput = aiProvider !== 'none'
   const meta = PROVIDER_META[aiProvider]
 
@@ -125,26 +139,51 @@ export function SettingsPage() {
       {/* ── Integrations ─────────────────────────────────────────────── */}
       <section className="animate-fadeIn" style={{ animationDelay: '80ms' }}>
         <SectionLabel icon={<Code className="w-3.5 h-3.5" />}>Integrations</SectionLabel>
-        <div className="bg-card border border-cardBorder rounded-xl p-6 card-glow transition-all duration-200">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3.5 min-w-0">
-              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center text-primary flex-shrink-0 border border-primary/10">
-                <Code className="w-5 h-5" />
+        <div className="space-y-4">
+          <div className="bg-card border border-cardBorder rounded-xl p-6 card-glow transition-all duration-200">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5 min-w-0">
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center text-primary flex-shrink-0 border border-primary/10">
+                  <Code className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-textPrimary">VS Code Extension</p>
+                  <p className="text-xs text-textMuted truncate">Sync coding sessions to the cloud</p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-textPrimary">VS Code Extension</p>
-                <p className="text-xs text-textMuted truncate">Sync coding sessions to the cloud</p>
-              </div>
+              <a
+                href={`https://contextlens-backend-001.web.app/api/auth/login?uid=${user?.uid}&callback=vscode://Noventra-Labs.contextlens`}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-black text-sm font-bold
+                           hover:brightness-110 active:scale-[0.97]
+                           transition-all duration-150 ease-out flex-shrink-0 shadow-lg shadow-primary/10"
+              >
+                Connect
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
             </div>
-            <a
-              href={`https://contextlens-backend-001.web.app/api/auth/login?uid=${user?.uid}&callback=vscode://Noventra-Labs.contextlens`}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-black text-sm font-bold
-                         hover:brightness-110 active:scale-[0.97]
-                         transition-all duration-150 ease-out flex-shrink-0 shadow-lg shadow-primary/10"
-            >
-              Connect
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
+          </div>
+
+          <div className="bg-card border border-cardBorder rounded-xl p-6 card-glow transition-all duration-200">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5 min-w-0">
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center text-primary flex-shrink-0 border border-primary/10">
+                  <Key className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-textPrimary">CLI Tool (cl)</p>
+                  <p className="text-xs text-textMuted truncate">Copy authentication token for the CLI</p>
+                </div>
+              </div>
+              <button
+                id="copy-cli-token-btn"
+                onClick={handleCopyCliToken}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-black text-sm font-bold
+                           hover:brightness-110 active:scale-[0.97]
+                           transition-all duration-150 ease-out flex-shrink-0 shadow-lg shadow-primary/10"
+              >
+                {copiedToken ? 'Copied!' : 'Copy Token'}
+              </button>
+            </div>
           </div>
         </div>
       </section>

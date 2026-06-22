@@ -47,6 +47,14 @@ export class EpisodeStore {
       context,
       apiClient: ApiClient
     });
+
+    // Fix 12: Resume sync queue after successful re-authentication
+    try {
+      const authManager = getAuthManager();
+      authManager.onDidSignIn(() => {
+        this.syncEngine?.resumeAfterAuth();
+      });
+    } catch { /* AuthManager not yet initialized — will be wired later */ }
   }
 
   /**
@@ -326,12 +334,16 @@ export class EpisodeStore {
     // format) never rejects the episodeId when the SyncEngine eventually flushes.
     const localEpisodeId = randomUUID();
 
+    // Fix 1: Send localEpisodeId as episodeId in payload so backend stores
+    // the same ID that local state references. No more ID mismatch.
     this.syncEngine?.enqueue({
       type: 'episode_create',
       endpoint: '/episodes/create',
       projectId: this.projectId,
+      episodeId: localEpisodeId,
       payload: {
         projectId: this.projectId,
+        episodeId: localEpisodeId,
         label: trimmedName,
         branchName: branchName || 'main',
       }

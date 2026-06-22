@@ -374,7 +374,7 @@ app.get('/api/auth/login', async (req, res) => {
  * @param {string} req.body.idToken - The Firebase ID token received from client-side sign-in.
  * @param {express.Response} res - The response object.
  */
-app.post('/api/auth/exchange', authLimiter, async (req, res) => {
+app.post('/api/auth/exchange', authLimiter, apiLimiter, async (req, res) => {
   try {
     const { idToken } = req.body;
     if (!idToken) {

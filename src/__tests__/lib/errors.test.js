@@ -1,26 +1,34 @@
-const { typedError, mapError } = require('../../lib/errors');
+const { typedError, mapError, SAFE_MESSAGES } = require('../../lib/errors');
 
 describe('Error Handling Utilities', () => {
   describe('typedError', () => {
     it('should create error object with code and message', () => {
       const result = typedError('test_error', 'Test error message');
       expect(result).toEqual({
+        ok: false,
         error: {
           code: 'test_error',
           message: 'Test error message',
           details: null,
+          retryable: false,
+          requestId: null,
+          action: 'none',
         },
       });
     });
 
     it('should create error object with details', () => {
       const details = { userId: 'user123', action: 'delete' };
-      const result = typedError('auth_error', 'Unauthorized action', details);
+      const result = typedError('auth_error', 'Unauthorized action', { details });
       expect(result).toEqual({
+        ok: false,
         error: {
           code: 'auth_error',
           message: 'Unauthorized action',
           details: details,
+          retryable: false,
+          requestId: null,
+          action: 'none',
         },
       });
     });
@@ -37,8 +45,11 @@ describe('Error Handling Utilities', () => {
       const result = mapError(err);
       expect(result).toEqual({
         status: 401,
-        code: 'unauthenticated',
-        message: 'Unauthenticated user',
+        code: 'AUTH_ERROR',
+        message: SAFE_MESSAGES.AUTH_ERROR,
+        retryable: false,
+        action: 'login',
+        requestId: null,
       });
     });
 
@@ -47,8 +58,11 @@ describe('Error Handling Utilities', () => {
       const result = mapError(err);
       expect(result).toEqual({
         status: 403,
-        code: 'forbidden',
-        message: 'Permission denied',
+        code: 'PERMISSION_DENIED',
+        message: SAFE_MESSAGES.PERMISSION_DENIED,
+        retryable: false,
+        action: 'none',
+        requestId: null,
       });
     });
 
@@ -63,7 +77,7 @@ describe('Error Handling Utilities', () => {
         const err = new Error(msg);
         const result = mapError(err);
         expect(result.status).toBe(404);
-        expect(result.code).toBe('not_found');
+        expect(result.code).toBe('RESOURCE_NOT_FOUND');
       });
     });
 
@@ -72,8 +86,11 @@ describe('Error Handling Utilities', () => {
       const result = mapError(err);
       expect(result).toEqual({
         status: 504,
-        code: 'model_timeout',
-        message: 'Request timeout occurred',
+        code: 'NETWORK_TIMEOUT',
+        message: SAFE_MESSAGES.NETWORK_TIMEOUT,
+        retryable: true,
+        action: 'retry',
+        requestId: null,
       });
     });
 
@@ -82,8 +99,11 @@ describe('Error Handling Utilities', () => {
       const result = mapError(err);
       expect(result).toEqual({
         status: 429,
-        code: 'quota_exceeded',
-        message: 'Quota exceeded for API',
+        code: 'RATE_LIMITED',
+        message: SAFE_MESSAGES.RATE_LIMITED,
+        retryable: true,
+        action: 'retry',
+        requestId: null,
       });
     });
 
@@ -92,8 +112,11 @@ describe('Error Handling Utilities', () => {
       const result = mapError(err);
       expect(result).toEqual({
         status: 500,
-        code: 'internal_error',
-        message: 'Something went wrong',
+        code: 'INTERNAL_ERROR',
+        message: SAFE_MESSAGES.INTERNAL_ERROR,
+        retryable: false,
+        action: 'none',
+        requestId: null,
       });
     });
 
@@ -101,8 +124,11 @@ describe('Error Handling Utilities', () => {
       const result = mapError(null);
       expect(result).toEqual({
         status: 500,
-        code: 'internal_error',
-        message: 'Unknown error',
+        code: 'INTERNAL_ERROR',
+        message: SAFE_MESSAGES.INTERNAL_ERROR,
+        retryable: false,
+        action: 'none',
+        requestId: null,
       });
     });
 
@@ -110,8 +136,11 @@ describe('Error Handling Utilities', () => {
       const result = mapError(undefined);
       expect(result).toEqual({
         status: 500,
-        code: 'internal_error',
-        message: 'Unknown error',
+        code: 'INTERNAL_ERROR',
+        message: SAFE_MESSAGES.INTERNAL_ERROR,
+        retryable: false,
+        action: 'none',
+        requestId: null,
       });
     });
 
@@ -120,17 +149,20 @@ describe('Error Handling Utilities', () => {
       const result = mapError(err);
       expect(result).toEqual({
         status: 500,
-        code: 'internal_error',
-        message: 'Unknown error',
+        code: 'INTERNAL_ERROR',
+        message: SAFE_MESSAGES.INTERNAL_ERROR,
+        retryable: false,
+        action: 'none',
+        requestId: null,
       });
     });
 
     it('should be case-insensitive for error matching', () => {
       const testCases = [
-        { message: 'UNAUTHENTICATED', expectedCode: 'unauthenticated', expectedStatus: 401 },
-        { message: 'Permission Denied', expectedCode: 'forbidden', expectedStatus: 403 },
-        { message: 'NOT_FOUND', expectedCode: 'not_found', expectedStatus: 404 },
-        { message: 'TIMEOUT', expectedCode: 'model_timeout', expectedStatus: 504 },
+        { message: 'UNAUTHENTICATED', expectedCode: 'AUTH_ERROR', expectedStatus: 401 },
+        { message: 'Permission Denied', expectedCode: 'PERMISSION_DENIED', expectedStatus: 403 },
+        { message: 'NOT_FOUND', expectedCode: 'RESOURCE_NOT_FOUND', expectedStatus: 404 },
+        { message: 'TIMEOUT', expectedCode: 'NETWORK_TIMEOUT', expectedStatus: 504 },
       ];
 
       testCases.forEach(({ message, expectedCode, expectedStatus }) => {
@@ -144,7 +176,7 @@ describe('Error Handling Utilities', () => {
     it('should prioritize first matching error pattern', () => {
       const err = new Error('Permission denied, not found');
       const result = mapError(err);
-      expect(result.code).toBe('forbidden');
+      expect(result.code).toBe('PERMISSION_DENIED');
       expect(result.status).toBe(403);
     });
   });

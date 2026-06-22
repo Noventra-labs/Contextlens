@@ -12,6 +12,8 @@ const http = require('http');
 
 const EXTENSION_PORT = 3012;
 const EXTENSION_HOST = '127.0.0.1';
+// Fix 4: Read MCP secret from environment (set by extension's auto-setup)
+const MCP_SECRET = process.env.CONTEXTLENS_MCP_SECRET || '';
 
 // Intercept console functions to prevent corrupting stdout protocol
 console.log = (...args) => process.stderr.write(args.join(' ') + '\n');
@@ -123,6 +125,49 @@ async function handleMessage(line) {
               type: 'object',
               properties: {}
             }
+          },
+          {
+            name: 'search_context',
+            description: 'Search for past episodes and AI calls by topic or content',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                query: { type: 'string', description: 'The search term or query' }
+              },
+              required: ['query']
+            }
+          },
+          {
+            name: 'get_episode_details',
+            description: 'Get detailed information about a specific episode and its AI calls',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                episodeId: { type: 'string', description: 'The UUID of the episode' }
+              },
+              required: ['episodeId']
+            }
+          },
+          {
+            name: 'get_recent_episodes',
+            description: 'Get recently accessed or modified episodes',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                limit: { type: 'number', description: 'Maximum number of episodes to return (optional, default 5)' }
+              }
+            }
+          },
+          {
+            name: 'explain_past_changes',
+            description: 'Request an AI explanation and audit of changes in a specific past episode',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                episodeId: { type: 'string', description: 'The UUID of the episode' }
+              },
+              required: ['episodeId']
+            }
           }
         ]
       });
@@ -150,7 +195,7 @@ async function handleToolCall(id, params) {
           `Project Name: ${res.projectName || 'N/A'}`,
           `Active Episode ID: ${res.episodeId || '❌ None active'}`,
           `Active Episode Name: ${res.activeEpisodeName || 'N/A'}`,
-          `Authentication: ${res.token ? '✅ Authenticated' : '❌ Not signed in inside VS Code'}`
+          `Authentication: ${res.authenticated ? '✅ Authenticated' : '❌ Not signed in inside VS Code'}`
         ].join('\n');
         sendToolResult(id, text);
         break;
@@ -210,6 +255,83 @@ async function handleToolCall(id, params) {
         break;
       }
 
+      case 'search_context': {
+        const res = await extensionRequest('/search', 'POST', { q: args.query });
+        if (res.error) {
+          sendToolError(id, res.error);
+        } else {
+          const episodesText = (res.episodes || []).map(e => `- [${e.status}] "${e.label}" (ID: ${e.id}, Branch: ${e.branchName})`).join('\n') || 'None';
+          const callsText = (res.calls || []).map(c => `- Call ID: ${c.id}\n  Episode ID: ${c.episodeId}\n  Source: ${c.source}\n  Prompt: ${c.promptText.substring(0, 100)}...\n  Response: ${c.modelResponse.substring(0, 100)}...`).join('\n\n') || 'None';
+          
+          const text = [
+            `### Search Results for "${args.query}"`,
+            `**Episodes:**`,
+            episodesText,
+            `\n**AI Calls:**`,
+            callsText
+          ].join('\n');
+          sendToolResult(id, text);
+        }
+        break;
+      }
+
+      case 'get_episode_details': {
+        const res = await extensionRequest('/get-episode', 'POST', { episodeId: args.episodeId });
+        if (res.error) {
+          sendToolError(id, res.error);
+        } else {
+          const ep = res.episode;
+          const calls = res.calls || [];
+          const callsText = calls.map(c => `[${new Date(c.createdAt?._seconds * 1000 || c.createdAt).toLocaleString()}] ${c.source.toUpperCase()} (${c.modelName || 'Unknown model'})\n- Prompt: ${c.promptText}\n- Response: ${c.modelResponse}`).join('\n\n') || 'No calls in this episode.';
+          
+          const text = [
+            `### Episode Details: "${ep.label}"`,
+            `- ID: ${ep.id}`,
+            `- Status: ${ep.status}`,
+            `- Branch: ${ep.branchName}`,
+            `- Started At: ${new Date(ep.startedAt?._seconds * 1000 || ep.startedAt).toLocaleString()}`,
+            `- Changed Files: ${ep.changedFiles?.join(', ') || 'None'}`,
+            `\n**AI Activity Log:**`,
+            callsText
+          ].join('\n');
+          sendToolResult(id, text);
+        }
+        break;
+      }
+
+      case 'get_recent_episodes': {
+        const res = await extensionRequest('/list-episodes', 'POST', { limit: args.limit });
+        if (res.error) {
+          sendToolError(id, res.error);
+        } else {
+          const text = [
+            `### Recent Coding Episodes`,
+            (res.episodes || []).map(e => `- [${e.status}] "${e.label}" (ID: ${e.id}, Branch: ${e.branchName}, Started: ${new Date(e.startedAt?._seconds * 1000 || e.startedAt).toLocaleString()})`).join('\n') || 'No episodes found.'
+          ].join('\n');
+          sendToolResult(id, text);
+        }
+        break;
+      }
+
+      case 'explain_past_changes': {
+        const res = await extensionRequest('/explain-past-changes', 'POST', { episodeId: args.episodeId });
+        if (res.error) {
+          sendToolError(id, res.error);
+        } else {
+          const text = [
+            `### AI Explanation of Past Episode Diffs`,
+            `**Summary:**`,
+            res.summary || 'No changes to explain.',
+            `\n**Risks Identified:**`,
+            (res.risks && res.risks.length > 0) ? res.risks.map(r => `- ${r}`).join('\n') : '- None',
+            `\n**Suggested Checks:**`,
+            (res.checks && res.checks.length > 0) ? res.checks.map(c => `- ${c}`).join('\n') : '- None'
+          ].join('\n');
+          sendToolResult(id, text);
+        }
+        break;
+      }
+
       default:
         sendErrorResponse(id, -32601, `Tool not found: ${name}`);
     }
@@ -232,7 +354,9 @@ function extensionRequest(path, method, body) {
       method: method,
       headers: {
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload)
+        'Content-Length': Buffer.byteLength(payload),
+        // Fix 4: Send MCP secret for authentication
+        'X-MCP-Secret': MCP_SECRET,
       }
     }, (res) => {
       let data = '';

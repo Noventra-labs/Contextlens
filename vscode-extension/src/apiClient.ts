@@ -8,8 +8,26 @@ import { NotificationService } from './NotificationService';
 const API_BASE = 'https://contextlens-backend-001.web.app/api';
 const DASHBOARD_BASE = 'https://contextlens-backend-001.web.app';
 
-// Firebase Web API key — needed to exchange custom tokens for ID tokens
-const FIREBASE_API_KEY = 'AIzaSyAQ2U7k1Z1h0myROPoj9upUMxJ-r_ZZ3ME';
+// Firebase Web API key — needed to exchange custom tokens for ID tokens.
+// Source order:
+//   1. webpack DefinePlugin (build-time, via FIREBASE_API_KEY env var)
+//   2. VS Code workspace setting `contextlens.firebaseApiKey` (for local dev)
+// The literal must NEVER live in source.
+declare const __FIREBASE_API_KEY__: string | undefined;
+
+function resolveFirebaseApiKey(): string {
+  const injected = typeof __FIREBASE_API_KEY__ !== 'undefined' ? __FIREBASE_API_KEY__ : '';
+  if (injected) return injected;
+
+  const fromConfig = vscode.workspace.getConfiguration('contextlens').get<string>('firebaseApiKey', '');
+  if (fromConfig && fromConfig.trim().length > 0) return fromConfig;
+
+  throw new Error(
+    '[ContextLens] Firebase API key is not configured. ' +
+    'Set the FIREBASE_API_KEY env var before running `npm run package`, ' +
+    'or set `contextlens.firebaseApiKey` in your VS Code settings for local development.'
+  );
+}
 
 export interface CreateProjectResponse {
   projectId: string;
@@ -42,6 +60,52 @@ export interface SummarizeBranchResponse {
   pr_summary: string;
   key_changes: string[];
   review_risks: string[];
+}
+
+export interface GetEpisodeResponse {
+  id: string;
+  label: string | null;
+  branchName: string;
+  status: string;
+  startedAt: string;
+  endedAt: string | null;
+  callCount: number;
+  changedFiles: string[];
+  latestDiffHash: string | null;
+  manualNotes: string | null;
+  recentCalls: Array<{
+    id: string;
+    createdAt: string;
+    source: string;
+    intentTag: string | null;
+    promptText: string;
+    modelName: string;
+    modelResponse: string;
+    branchName: string | null;
+    activeFilePath: string | null;
+    relatedFiles: string[];
+    diffSnapshot: any;
+    diffHash: string | null;
+    todoMatches: string[];
+    latencyMs: number;
+    tokenUsage: any;
+    status: string;
+  }>;
+}
+
+export interface ListEpisodesResponse {
+  items: Array<{
+    id: string;
+    label: string | null;
+    branchName: string;
+    status: string;
+    startedAt: string;
+    endedAt: string | null;
+    callCount: number;
+    changedFiles: string[];
+    latestDiffHash: string | null;
+    manualNotes: string | null;
+  }>;
 }
 
 /**
@@ -107,7 +171,7 @@ async function exchangeCustomTokenForIdToken(customToken: string): Promise<{
   idToken: string;
   refreshToken: string;
 }> {
-  const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${FIREBASE_API_KEY}`;
+  const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${resolveFirebaseApiKey()}`;
   const res = await httpRequest(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -139,7 +203,7 @@ async function refreshIdToken(refreshToken: string): Promise<{
   id_token: string;
   refresh_token: string;
 }> {
-  const url = `https://securetoken.googleapis.com/v1/token?key=${FIREBASE_API_KEY}`;
+  const url = `https://securetoken.googleapis.com/v1/token?key=${resolveFirebaseApiKey()}`;
   const res = await httpRequest(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -159,16 +223,17 @@ async function refreshIdToken(refreshToken: string): Promise<{
 }
 
 /**
- * Authenticated POST request to the backend.
+ * Authenticated request to the backend.
  * Pulls the Bearer token from AuthManager's SecretStorage.
  * On 401, attempts a token refresh before giving up.
  *
  * @template T The expected type of the response.
  * @param path The API endpoint path (e.g., '/projects/create').
- * @param body Optional JSON body for the POST request.
+ * @param method The HTTP method (default: 'POST')
+ * @param body Optional JSON body for the request.
  * @returns The parsed JSON response body cast to type T.
  */
-async function request<T>(path: string, body?: object): Promise<T> {
+async function request<T>(path: string, methodOrBody: string | object = 'POST', bodyOrHeaders?: object | Record<string, string>, extraHeaders?: Record<string, string>): Promise<T> {
   const authManager = getAuthManager();
   let token = await authManager.getIdToken();
 
@@ -188,18 +253,34 @@ async function request<T>(path: string, body?: object): Promise<T> {
     }
   }
 
+  let method = 'POST';
+  let requestBody: object | undefined;
+  let mergedExtraHeaders: Record<string, string> | undefined = extraHeaders;
+
+  if (typeof methodOrBody === 'string') {
+    method = methodOrBody;
+    requestBody = bodyOrHeaders as object | undefined;
+  } else if (typeof methodOrBody === 'object') {
+    requestBody = methodOrBody;
+    // When called as request(path, body, extraHeaders):
+    // bodyOrHeaders here is actually extraHeaders
+    mergedExtraHeaders = bodyOrHeaders as Record<string, string> | undefined;
+  }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`,
+    // Fix 2: Merge custom headers (e.g. X-Idempotency-Key)
+    ...mergedExtraHeaders,
   };
 
-  const jsonBody = body ? JSON.stringify(body) : undefined;
+  const jsonBody = requestBody ? JSON.stringify(requestBody) : undefined;
   if (jsonBody) {
     headers['Content-Length'] = Buffer.byteLength(jsonBody).toString();
   }
 
   let res = await httpRequest(`${API_BASE}${path}`, {
-    method: 'POST',
+    method,
     headers,
     body: jsonBody,
   });
@@ -212,7 +293,7 @@ async function request<T>(path: string, body?: object): Promise<T> {
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
         res = await httpRequest(`${API_BASE}${path}`, {
-          method: 'POST',
+          method,
           headers,
           body: jsonBody,
         });
@@ -264,6 +345,10 @@ async function request<T>(path: string, body?: object): Promise<T> {
  * 2. If the request fails with 401 (Unauthorized), the client attempts to refresh the token.
  * 3. If refresh succeeds, the original request is retried exactly once.
  * 4. If refresh fails or second attempt is 401, the user is notified of session expiry.
+ *
+ * Refresh coordination (B3): N concurrent 401s in flight share a single
+ * refresh via the mutex in `coordinateRefresh`. Each waiter then retries
+ * its own request with the freshly minted token.
  * 
  * Custom Token Exchange:
  * The backend issues "Custom Tokens" which are exchanged for "ID Tokens" via the Firebase 
@@ -272,13 +357,15 @@ async function request<T>(path: string, body?: object): Promise<T> {
 export class ApiClient {
   /**
    * Generic post method for SyncEngine or manual logging.
+   * Fix 2: Now accepts optional headers (e.g. X-Idempotency-Key) and forwards them.
    *
    * @param endpoint The API path to post to.
    * @param body The JSON payload.
+   * @param options Optional request options including custom headers.
    * @returns The raw API response.
    */
-  static async post(endpoint: string, body: object): Promise<any> {
-    return request(endpoint, body);
+  static async post(endpoint: string, body: object, options?: { headers?: Record<string, string> }): Promise<any> {
+    return request(endpoint, body, options?.headers);
   }
 
   /**
@@ -411,6 +498,26 @@ export class ApiClient {
     anthropicApiKey?: string;
   }): Promise<{ saved: boolean }> {
     return request('/settings/update', body);
+  }
+
+  // ── Episode Retrieval ────────────────────────────────────────────────────
+
+  static async getEpisode(projectId: string, episodeId: string): Promise<GetEpisodeResponse> {
+    const response = await request<{ ok: boolean; episode: GetEpisodeResponse }>(`/episodes/${episodeId}?projectId=${encodeURIComponent(projectId)}`, 'GET');
+    return response.episode;
+  }
+
+  /**
+   * Lists episodes for a project.
+   *
+   * @param projectId The project ID
+   * @param limit Maximum number of episodes to return (default: 10)
+   * @param includeClosed Whether to include closed episodes (default: false)
+   * @returns Array of episode objects
+   */
+  static async listEpisodes(projectId: string, limit: number = 10, includeClosed: boolean = false): Promise<GetEpisodeResponse[]> {
+    const response = await request<{ ok: boolean; episodes: GetEpisodeResponse[] }>('/episodes/list', 'POST', { projectId, limit, includeClosed });
+    return response.episodes;
   }
 
   // ── Dashboard URLs ───────────────────────────────────────────────────────
