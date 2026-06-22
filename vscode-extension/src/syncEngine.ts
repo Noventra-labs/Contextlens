@@ -159,6 +159,16 @@ export class SyncEngine {
     this.stateListeners.push(listener);
   }
 
+  /**
+   * Fix 12: Resume queue after successful re-authentication.
+   * Transitions out of paused-auth state and triggers immediate flush.
+   */
+  async resumeAfterAuth(): Promise<void> {
+    if (this._state !== 'paused-auth') return;
+    this.setState('pending');
+    await this.flush();
+  }
+
   // ─── FLUSH ──────────────────────────────────────────────
 
   /**
@@ -398,7 +408,7 @@ function isAuthError(err: any): boolean {
 async function checkOnline(): Promise<boolean> {
   try {
     const res = await fetch(
-      'https://us-central1-contextlens-backend-001.cloudfunctions.net/api/health',
+      'https://contextlens-backend-001.web.app/api/_health',
       { method: 'GET', signal: AbortSignal.timeout(5000) }
     );
     return res.ok;

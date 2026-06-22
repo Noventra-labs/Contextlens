@@ -1,7 +1,0 @@
-# Exclude development and unrelated files
-migrate-demo-to-real.js
-SUMMARY.md
-INSTALL.md
-.DS_Store
-node_modules/
-*.log

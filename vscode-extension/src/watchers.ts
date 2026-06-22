@@ -21,6 +21,8 @@ let lastBranch: string | null = null;
 let lastCommitMessage: string = '';
 let branchCooldown = false;
 let commitDebounce: ReturnType<typeof setTimeout> | null = null;
+// Fix 11: Guard against duplicate watcher registration
+let watchersInitialized = false;
 const deduplicator = new EventDeduplicator();
 const notifier = NotificationService.getInstance();
 
@@ -33,6 +35,9 @@ const MAX_DIFF_CHARS = 6000;
 export async function startWatchers(
   deps: WatcherDeps
 ): Promise<void> {
+  // Fix 11: Prevent duplicate watcher registration
+  if (watchersInitialized) return;
+
   const workspaceRoot =
     vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspaceRoot) return;
@@ -44,6 +49,7 @@ export async function startWatchers(
     return;
   }
 
+  watchersInitialized = true;
   watchBranch(gitDir, deps);
   watchCommits(gitDir, deps);
   watchFileSaves(deps);
@@ -198,7 +204,9 @@ function watchFileSaves(deps: WatcherDeps): void {
 
         // Debounce per-file to avoid rapid-fire events
         deduplicator.debounce('file_save', doc.uri.fsPath, () => {
-          episodeStore.addChangedFile(doc.uri.fsPath);
+          // Fix 13: Store workspace-relative paths, not absolute
+          const relativePath = path.relative(workspaceRoot, doc.uri.fsPath);
+          episodeStore.addChangedFile(relativePath);
           deps.stateTreeProvider.refresh();
         });
 

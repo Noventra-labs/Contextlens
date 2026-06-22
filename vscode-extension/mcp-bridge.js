@@ -12,6 +12,8 @@ const http = require('http');
 
 const EXTENSION_PORT = 3012;
 const EXTENSION_HOST = '127.0.0.1';
+// Fix 4: Read MCP secret from environment (set by extension's auto-setup)
+const MCP_SECRET = process.env.CONTEXTLENS_MCP_SECRET || '';
 
 // Intercept console functions to prevent corrupting stdout protocol
 console.log = (...args) => process.stderr.write(args.join(' ') + '\n');
@@ -193,7 +195,7 @@ async function handleToolCall(id, params) {
           `Project Name: ${res.projectName || 'N/A'}`,
           `Active Episode ID: ${res.episodeId || '❌ None active'}`,
           `Active Episode Name: ${res.activeEpisodeName || 'N/A'}`,
-          `Authentication: ${res.token ? '✅ Authenticated' : '❌ Not signed in inside VS Code'}`
+          `Authentication: ${res.authenticated ? '✅ Authenticated' : '❌ Not signed in inside VS Code'}`
         ].join('\n');
         sendToolResult(id, text);
         break;
@@ -352,7 +354,9 @@ function extensionRequest(path, method, body) {
       method: method,
       headers: {
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload)
+        'Content-Length': Buffer.byteLength(payload),
+        // Fix 4: Send MCP secret for authentication
+        'X-MCP-Secret': MCP_SECRET,
       }
     }, (res) => {
       let data = '';

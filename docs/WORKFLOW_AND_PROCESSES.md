@@ -1,6 +1,6 @@
 # ContextLens: Workflows & Technical Processes
 
-This document provides a deep dive into the operational mechanics of the ContextLens ecosystem, specifically focusing on the VS Code Extension, the CLI, and the automated project lifecycle.
+This document provides a deep dive into the operational mechanics of the ContextLens ecosystem, specifically focusing on the VS Code Extension and the automated project lifecycle.
 
 ---
 
@@ -25,30 +25,12 @@ The extension runs background processes ("Watchers") that monitor:
 
 ---
 
-## 💻 2. CLI (`cl`) Architecture
-
-The CLI is a standalone Node.js application designed for terminal-heavy workflows and CI/CD integration.
-
-### 🛠️ Global vs. Local Setup
--   **Installation**: Run `npm install -g .` within the `/cli` directory.
--   **Global Config**: Stored in `~/.contextlens/config.json`. This holds your **Authentication Token**, allowing the CLI to work across any directory on your machine.
--   **Local Config**: Stored in `./.contextlens/config.json` within a specific project folder. This holds the **Project ID**, linking that directory to a specific ContextLens dashboard.
-
-### 🔄 Data Flow
-When you run a command like `cl log "Fixed bug"`:
-1.  The CLI loads the **Global Token**.
-2.  The CLI loads the **Local Project ID**.
-3.  It finds the **Active Episode** by querying the backend for the current user's state.
-4.  It sends a `POST` request to the backend with the message and metadata.
-
----
-
-## 🚀 3. Automatic Project Creation
+## 🚀 2. Automatic Project Creation
 
 ContextLens minimizes manual setup by automatically resolving project identities.
 
 ### 🔍 The "Fingerprinting" Process
-When the VS Code extension or CLI initializes in a new folder:
+When the VS Code extension initializes in a new folder:
 1.  **Remote Check**: It executes `git remote get-url origin`.
 2.  **Naming**: It defaults the project name to the folder's name (e.g., `ContextLens`).
 3.  **Creation Request**: It calls `POST /api/projects` with the `repoUrl` and `name`.
@@ -62,7 +44,7 @@ When the VS Code extension or CLI initializes in a new folder:
 
 ---
 
-## 📊 4. The Sync Engine
+## 📊 3. The Sync Engine
 
 To ensure data integrity during offline development:
 1.  **Buffering**: All "Calls" and "Events" are first written to a local JSON buffer.
@@ -71,5 +53,4 @@ To ensure data integrity during offline development:
 
 ---
 
-> [!TIP]
-> To view your current project status from the terminal at any time, simply run `cl status`.
+

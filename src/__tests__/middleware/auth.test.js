@@ -51,9 +51,14 @@ describe('Auth Middleware', () => {
 
       expect(res.status).toHaveBeenCalledWith(401);
       expect(res.json).toHaveBeenCalledWith({
+        ok: false,
         error: {
-          code: 'unauthenticated',
+          code: 'AUTH_ERROR',
           message: 'No authorization token provided. Please sign in.',
+          retryable: false,
+          requestId: null,
+          action: 'login',
+          details: null,
         },
       });
       expect(next).not.toHaveBeenCalled();
@@ -66,9 +71,14 @@ describe('Auth Middleware', () => {
 
       expect(res.status).toHaveBeenCalledWith(401);
       expect(res.json).toHaveBeenCalledWith({
+        ok: false,
         error: {
-          code: 'unauthenticated',
+          code: 'AUTH_ERROR',
           message: 'No authorization token provided. Please sign in.',
+          retryable: false,
+          requestId: null,
+          action: 'login',
+          details: null,
         },
       });
     });
@@ -90,9 +100,14 @@ describe('Auth Middleware', () => {
 
       expect(res.status).toHaveBeenCalledWith(401);
       expect(res.json).toHaveBeenCalledWith({
+        ok: false,
         error: {
-          code: 'unauthenticated',
+          code: 'AUTH_ERROR',
           message: 'Malformed authorization header.',
+          retryable: false,
+          requestId: null,
+          action: 'login',
+          details: null,
         },
       });
     });
@@ -107,9 +122,14 @@ describe('Auth Middleware', () => {
 
       expect(res.status).toHaveBeenCalledWith(401);
       expect(res.json).toHaveBeenCalledWith({
+        ok: false,
         error: {
-          code: 'invalid_token',
-          message: 'Invalid ID token',
+          code: 'AUTH_ERROR',
+          message: 'Invalid or expired token. Please sign in again.',
+          retryable: false,
+          requestId: null,
+          action: 'login',
+          details: null,
         },
       });
       expect(next).not.toHaveBeenCalled();
@@ -125,9 +145,14 @@ describe('Auth Middleware', () => {
 
       expect(res.status).toHaveBeenCalledWith(401);
       expect(res.json).toHaveBeenCalledWith({
+        ok: false,
         error: {
-          code: 'invalid_token',
-          message: 'Firebase ID token has expired',
+          code: 'AUTH_EXPIRED',
+          message: 'Session expired. Sign in again to continue syncing.',
+          retryable: false,
+          requestId: null,
+          action: 'login',
+          details: null,
         },
       });
     });
@@ -191,7 +216,7 @@ describe('Auth Middleware', () => {
       expect(res.status).toHaveBeenCalledWith(401);
       expect(res.json).toHaveBeenCalled();
       const callArgs = res.json.mock.calls[0][0];
-      expect(callArgs.error.code).toBe('invalid_token');
+      expect(callArgs.error.code).toBe('AUTH_ERROR');
     });
   });
 });
