@@ -1,11 +1,12 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { GitBranch, X, ChevronDown, Zap, ExternalLink, Trash2, Loader2 } from 'lucide-react'
+import { GitBranch, X, ChevronDown, Zap, ExternalLink, Trash2, Loader2, LayoutList, Calendar } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useSearch } from '../context/SearchContext'
 import { useProjects, useEpisodes } from '../lib/firestoreHooks'
 import { useProjectSearch } from '../hooks/useProjectSearch'
 import { EpisodeTimeline } from '../components/episodes/EpisodeTimeline'
+import { EpisodeCard } from '../components/episodes/EpisodeCard'
 import { SkeletonCard } from '../components/ui/SkeletonCard'
 import { EmptyState } from '../components/ui/EmptyState'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
@@ -37,6 +38,7 @@ export function ProjectPage() {
 
   const [branchFilter, setBranchFilter] = useState<string>('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [viewMode, setViewMode] = useState<'list' | 'timeline'>('list')
 
   const { searchResults, searchLoading } = useProjectSearch(
     projectId ?? '',
@@ -199,6 +201,32 @@ export function ProjectPage() {
 
         {branchFilter && <Badge text={branchFilter} variant="branch" />}
 
+        {/* View Toggle */}
+        <div className="flex items-center bg-white/[0.03] border border-cardBorder/50 rounded-lg p-0.5 ml-2">
+          <button
+            onClick={() => setViewMode('list')}
+            className={`p-1.5 rounded-md transition-all duration-150 flex items-center gap-1 ${
+              viewMode === 'list'
+                ? 'bg-primary text-black font-semibold shadow-sm'
+                : 'text-textMuted/70 hover:text-textPrimary'
+            }`}
+            title="List View"
+          >
+            <LayoutList className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setViewMode('timeline')}
+            className={`p-1.5 rounded-md transition-all duration-150 flex items-center gap-1 ${
+              viewMode === 'timeline'
+                ? 'bg-primary text-black font-semibold shadow-sm'
+                : 'text-textMuted/70 hover:text-textPrimary'
+            }`}
+            title="Timeline View"
+          >
+            <Calendar className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
         {/* Result count */}
         {!isLoading && (
           <span className="ml-auto text-[10px] text-textMuted/30 tabular-nums">
@@ -207,7 +235,7 @@ export function ProjectPage() {
         )}
       </div>
 
-      {/* Timeline */}
+      {/* Episodes Section */}
       {isLoading && !episodes.length ? (
         <div className="space-y-3">
           <SkeletonCard />
@@ -223,12 +251,22 @@ export function ProjectPage() {
               : 'Episodes are created automatically when you code with AI in VS Code.'
           }
         />
-      ) : (
+      ) : viewMode === 'timeline' ? (
         <EpisodeTimeline
           episodes={filteredEpisodes}
           projectId={projectId ?? ''}
-          uid={user?.uid ?? ''}
         />
+      ) : (
+        <div className="space-y-4">
+          {filteredEpisodes.map((ep) => (
+            <EpisodeCard
+              key={ep.id}
+              episode={ep}
+              projectId={projectId ?? ''}
+              uid={user?.uid ?? ''}
+            />
+          ))}
+        </div>
       )}
 
       {showConfirm && (

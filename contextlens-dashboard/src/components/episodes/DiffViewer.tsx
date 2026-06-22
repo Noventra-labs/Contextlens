@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import ReactDiffViewer from 'react-diff-viewer-continued'
 import { countDiffLines } from '../../lib/utils'
+import { useTheme } from '../../context/ThemeContext'
 
 interface DiffViewerProps {
   diff: string
@@ -31,6 +32,7 @@ function parseDiff(diff: string): { oldValue: string; newValue: string } {
 
 export function DiffViewer({ diff }: DiffViewerProps) {
   const [showDiff, setShowDiff] = useState(false)
+  const { resolvedTheme } = useTheme()
   const lineCount = countDiffLines(diff)
   const isLong = lineCount > 30
 
@@ -54,7 +56,7 @@ export function DiffViewer({ diff }: DiffViewerProps) {
             <ReactDiffViewer
               {...parseDiff(diff)}
               splitView={false}
-              useDarkTheme={true}
+              useDarkTheme={resolvedTheme === 'dark'}
               hideLineNumbers={false}
               styles={{
                 variables: {

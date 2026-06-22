@@ -94,8 +94,9 @@ export const HomePage = memo(function HomePage() {
           <EmptyState
             title="No projects yet"
             description="Install the VS Code extension to start capturing AI coding sessions."
-            ctaLabel="View docs"
-            ctaHref="https://github.com"
+            variant="projects"
+            ctaLabel="Get Started"
+            ctaOnClick={() => navigate('/dashboard/setup')}
           />
         )}
 
@@ -138,6 +139,7 @@ export const HomePage = memo(function HomePage() {
           <EmptyState
             title="No episodes yet"
             description="Episodes are created automatically when you use AI in VS Code with ContextLens."
+            variant="episodes"
           />
         )}
 
