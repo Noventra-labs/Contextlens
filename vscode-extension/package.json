@@ -142,6 +142,18 @@
           "type": "string",
           "default": "https://us-central1-contextlens-backend-001.cloudfunctions.net/api",
           "description": "The base URL for the ContextLens backend API."
+        },
+        "contextlens.firebaseApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Firebase Web API key used for custom-token exchange and refresh. Injected at build time via FIREBASE_API_KEY env var; override here only for local development. Never edit in published builds."
+        },
+        "contextlens.tokenRefreshMinutes": {
+          "type": "number",
+          "default": 45,
+          "minimum": 5,
+          "maximum": 55,
+          "description": "How often (minutes) the extension proactively refreshes the Firebase ID token. Must be under the 60-minute token expiry."
         }
       }
     },

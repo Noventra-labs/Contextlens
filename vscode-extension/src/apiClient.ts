@@ -8,8 +8,26 @@ import { NotificationService } from './NotificationService';
 const API_BASE = 'https://contextlens-backend-001.web.app/api';
 const DASHBOARD_BASE = 'https://contextlens-backend-001.web.app';
 
-// Firebase Web API key — needed to exchange custom tokens for ID tokens
-const FIREBASE_API_KEY = 'AIzaSyAQ2U7k1Z1h0myROPoj9upUMxJ-r_ZZ3ME';
+// Firebase Web API key — needed to exchange custom tokens for ID tokens.
+// Source order:
+//   1. webpack DefinePlugin (build-time, via FIREBASE_API_KEY env var)
+//   2. VS Code workspace setting `contextlens.firebaseApiKey` (for local dev)
+// The literal must NEVER live in source.
+declare const __FIREBASE_API_KEY__: string | undefined;
+
+function resolveFirebaseApiKey(): string {
+  const injected = typeof __FIREBASE_API_KEY__ !== 'undefined' ? __FIREBASE_API_KEY__ : '';
+  if (injected) return injected;
+
+  const fromConfig = vscode.workspace.getConfiguration('contextlens').get<string>('firebaseApiKey', '');
+  if (fromConfig && fromConfig.trim().length > 0) return fromConfig;
+
+  throw new Error(
+    '[ContextLens] Firebase API key is not configured. ' +
+    'Set the FIREBASE_API_KEY env var before running `npm run package`, ' +
+    'or set `contextlens.firebaseApiKey` in your VS Code settings for local development.'
+  );
+}
 
 export interface CreateProjectResponse {
   projectId: string;
@@ -153,7 +171,7 @@ async function exchangeCustomTokenForIdToken(customToken: string): Promise<{
   idToken: string;
   refreshToken: string;
 }> {
-  const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${FIREBASE_API_KEY}`;
+  const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${resolveFirebaseApiKey()}`;
   const res = await httpRequest(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -185,7 +203,7 @@ async function refreshIdToken(refreshToken: string): Promise<{
   id_token: string;
   refresh_token: string;
 }> {
-  const url = `https://securetoken.googleapis.com/v1/token?key=${FIREBASE_API_KEY}`;
+  const url = `https://securetoken.googleapis.com/v1/token?key=${resolveFirebaseApiKey()}`;
   const res = await httpRequest(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -215,7 +233,7 @@ async function refreshIdToken(refreshToken: string): Promise<{
  * @param body Optional JSON body for the request.
  * @returns The parsed JSON response body cast to type T.
  */
-async function request<T>(path: string, methodOrBody: string | object = 'POST', body?: object): Promise<T> {
+async function request<T>(path: string, methodOrBody: string | object = 'POST', bodyOrHeaders?: object | Record<string, string>, extraHeaders?: Record<string, string>): Promise<T> {
   const authManager = getAuthManager();
   let token = await authManager.getIdToken();
 
@@ -236,16 +254,24 @@ async function request<T>(path: string, methodOrBody: string | object = 'POST', 
   }
 
   let method = 'POST';
-  let requestBody = body;
+  let requestBody: object | undefined;
+  let mergedExtraHeaders: Record<string, string> | undefined = extraHeaders;
+
   if (typeof methodOrBody === 'string') {
     method = methodOrBody;
+    requestBody = bodyOrHeaders as object | undefined;
   } else if (typeof methodOrBody === 'object') {
     requestBody = methodOrBody;
+    // When called as request(path, body, extraHeaders):
+    // bodyOrHeaders here is actually extraHeaders
+    mergedExtraHeaders = bodyOrHeaders as Record<string, string> | undefined;
   }
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`,
+    // Fix 2: Merge custom headers (e.g. X-Idempotency-Key)
+    ...mergedExtraHeaders,
   };
 
   const jsonBody = requestBody ? JSON.stringify(requestBody) : undefined;
@@ -319,6 +345,10 @@ async function request<T>(path: string, methodOrBody: string | object = 'POST', 
  * 2. If the request fails with 401 (Unauthorized), the client attempts to refresh the token.
  * 3. If refresh succeeds, the original request is retried exactly once.
  * 4. If refresh fails or second attempt is 401, the user is notified of session expiry.
+ *
+ * Refresh coordination (B3): N concurrent 401s in flight share a single
+ * refresh via the mutex in `coordinateRefresh`. Each waiter then retries
+ * its own request with the freshly minted token.
  * 
  * Custom Token Exchange:
  * The backend issues "Custom Tokens" which are exchanged for "ID Tokens" via the Firebase 
@@ -327,13 +357,15 @@ async function request<T>(path: string, methodOrBody: string | object = 'POST', 
 export class ApiClient {
   /**
    * Generic post method for SyncEngine or manual logging.
+   * Fix 2: Now accepts optional headers (e.g. X-Idempotency-Key) and forwards them.
    *
    * @param endpoint The API path to post to.
    * @param body The JSON payload.
+   * @param options Optional request options including custom headers.
    * @returns The raw API response.
    */
-  static async post(endpoint: string, body: object): Promise<any> {
-    return request(endpoint, body);
+  static async post(endpoint: string, body: object, options?: { headers?: Record<string, string> }): Promise<any> {
+    return request(endpoint, body, options?.headers);
   }
 
   /**

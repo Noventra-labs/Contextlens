@@ -1,4 +1,4 @@
-const { body, validationResult } = require('express-validator');
+const { body, query, param, validationResult } = require('express-validator');
 
 /**
  * Returns validation errors as a standardized error response.
@@ -30,6 +30,18 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
  */
 const isUUID = (field) =>
   body(field)
+    .trim()
+    .matches(UUID_REGEX)
+    .withMessage(`${field} must be a valid UUID`);
+
+const isQueryUUID = (field) =>
+  query(field)
+    .trim()
+    .matches(UUID_REGEX)
+    .withMessage(`${field} must be a valid UUID`);
+
+const isParamUUID = (field) =>
+  param(field)
     .trim()
     .matches(UUID_REGEX)
     .withMessage(`${field} must be a valid UUID`);
@@ -72,6 +84,7 @@ const createProjectRules = [
 
 const createEpisodeRules = [
   isUUID('projectId'),
+  body('episodeId').optional().trim().matches(UUID_REGEX).withMessage('episodeId must be a valid UUID'),
   isNonEmptyString('branchName', 200),
   body('label').optional().trim().isLength({ max: 500 }),
   handleValidation,
@@ -121,8 +134,8 @@ const closeEpisodeRules = [
 
 // Validation rules for new episode retrieval endpoints
 const getEpisodeRules = [
-  isUUID('projectId'),
-  isUUID('episodeId'),
+  isQueryUUID('projectId'),
+  isParamUUID('episodeId'),
   handleValidation,
 ];
 
@@ -130,6 +143,26 @@ const listEpisodesRules = [
   isUUID('projectId'),
   body('limit').optional().isInt({ min: 1, max: 100 }),
   body('includeClosed').optional().isBoolean(),
+  handleValidation,
+];
+
+// POST /episodes/get — body requires projectId + episodeId (was reusing explainRules wrong)
+const getEpisodeBodyRules = [
+  isUUID('projectId'),
+  isUUID('episodeId'),
+  handleValidation,
+];
+
+// POST /settings/get — no fields required, but cap body size implicitly
+const settingsGetRules = [handleValidation];
+
+// POST /settings/update — provider whitelist + key length caps
+const ALLOWED_PROVIDERS = ['none', 'gemini', 'openai', 'anthropic'];
+const settingsUpdateRules = [
+  body('aiProvider').optional().isIn(ALLOWED_PROVIDERS).withMessage(`aiProvider must be one of: ${ALLOWED_PROVIDERS.join(', ')}`),
+  body('geminiApiKey').optional().isString().isLength({ max: 256 }).withMessage('geminiApiKey must be at most 256 characters'),
+  body('openaiApiKey').optional().isString().isLength({ max: 256 }).withMessage('openaiApiKey must be at most 256 characters'),
+  body('anthropicApiKey').optional().isString().isLength({ max: 256 }).withMessage('anthropicApiKey must be at most 256 characters'),
   handleValidation,
 ];
 
@@ -143,5 +176,8 @@ module.exports = {
   searchRules,
   closeEpisodeRules,
   getEpisodeRules,
+  getEpisodeBodyRules,
   listEpisodesRules,
+  settingsGetRules,
+  settingsUpdateRules,
 };

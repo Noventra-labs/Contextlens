@@ -18,7 +18,10 @@ const {
   searchRules,
   closeEpisodeRules,
   getEpisodeRules,
+  getEpisodeBodyRules,
   listEpisodesRules,
+  settingsGetRules,
+  settingsUpdateRules,
 } = require('../middleware/validate');
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -212,14 +215,16 @@ router.post('/projects/create', createProjectRules, async (req, res) => {
  */
 router.post('/episodes/create', createEpisodeRules, async (req, res) => {
   const { uid } = req.user;
-  const { projectId, label, branchName } = req.body;
+  const { projectId, label, branchName, episodeId: clientEpisodeId } = req.body;
   
   try {
     // Verify project ownership
     const projectRef = await verifyProjectOwnership(uid, projectId, req, res);
     if (!projectRef) return;
 
-    const episodeId = randomUUID();
+    // Fix 1: Accept client-generated UUID for offline queue consistency.
+    // If client provides episodeId, use it. Otherwise generate server-side.
+    const episodeId = clientEpisodeId || randomUUID();
     const now = new Date();
     const epRef = db.collection('users').doc(uid).collection('projects').doc(projectId).collection('episodes').doc(episodeId);
     await epRef.set({ label: label || null, branchName, status: 'open', startedAt: now, endedAt: null, callCount: 0, changedFiles: [], latestDiffHash: null, manualNotes: null });
@@ -337,7 +342,7 @@ router.post('/calls/log', aiLimiter, logCallRules, async (req, res) => {
  */
 router.post('/episodes/explain', aiLimiter, explainRules, async (req, res) => {
   const { uid } = req.user;
-  const { projectId, episodeId, diffHash, changedFiles, customApiKey } = req.body;
+  const { projectId, episodeId, diffHash, changedFiles, customApiKey, diffText } = req.body;
   
   try {
     // Verify ownership
@@ -361,14 +366,36 @@ router.post('/episodes/explain', aiLimiter, explainRules, async (req, res) => {
 
     const finalChangedFiles = changedFiles || epData.changedFiles || [];
     const changedFilesList = finalChangedFiles.join(', ');
-    const prompt = explainDiffTemplate({ changedFilesList });
+
+    // Fix 6: Include actual diff text if provided (already redacted by extension).
+    // If not provided, try to fetch latest diff from most recent call.
+    let finalDiffText = diffText || '';
+    if (!finalDiffText) {
+      try {
+        const latestCall = await epRef.collection('calls')
+          .orderBy('createdAt', 'desc')
+          .limit(1)
+          .get();
+        if (!latestCall.empty) {
+          const callData = latestCall.docs[0].data();
+          finalDiffText = callData.diffSnapshot || '';
+        }
+      } catch { /* no diff available, proceed with filenames only */ }
+    }
+    // Truncate diff to prevent huge prompts (max 8000 chars)
+    if (finalDiffText && finalDiffText.length > 8000) {
+      finalDiffText = finalDiffText.slice(0, 8000) + '\n... [TRUNCATED]';
+    }
+
+    const prompt = explainDiffTemplate({ changedFilesList, diffText: redactText(finalDiffText) });
     const { provider, customApiKey: finalApiKey } = await getProviderConfig(uid, customApiKey);
     if (provider !== 'gemini' && !finalApiKey) {
       return res.status(400).json(
         typedError(ErrorCodes.CONFIG_ERROR, `No API key configured for ${provider}.`, { requestId: req.id })
       );
     }
-    const aiResp = await callGemini(prompt, 'gemini-1.5-pro', { responseMimeType: 'application/json', maxOutputTokens: 768, customApiKey: finalApiKey, provider });
+    // Fix 6: Increased maxOutputTokens from 768 to 2048 to prevent truncated JSON
+    const aiResp = await callGemini(prompt, 'gemini-1.5-pro', { responseMimeType: 'application/json', maxOutputTokens: 2048, customApiKey: finalApiKey, provider });
     const result = structuredOrFallback(aiResp, (text) => ({ summary: text, risks: [], checks: [] }));
     const normalized = {
       summary: result.summary || aiResp.text,
@@ -445,21 +472,43 @@ router.post('/search', searchRules, async (req, res) => {
     const projectRef = await verifyProjectOwnership(uid, projectId, req, res);
     if (!projectRef) return;
 
-    // Naive search: look through episodes and calls for matching text in labels, prompts, responses.
+    // Fix 8: Bounded search — limit reads instead of full collection scan.
+    // Phase 1: Search episodes (max 50, ordered by most recent)
+    const MAX_EPISODES = 50;
+    const MAX_CALLS_PER_EP = 10;
+    const MAX_TOTAL_RESULTS = 100;
+
     const episodesCol = db.collection('users').doc(uid).collection('projects').doc(projectId).collection('episodes');
-    const episodesSnap = await episodesCol.get();
+    const episodesSnap = await episodesCol.orderBy('startedAt', 'desc').limit(MAX_EPISODES).get();
     const results = { episodes: [], calls: [] };
+
     for (const ep of episodesSnap.docs) {
       const data = ep.data();
-      if (!q || JSON.stringify(data).toLowerCase().includes(q.toLowerCase())) results.episodes.push({ id: ep.id, ...data });
-      const callsSnap = await ep.ref.collection('calls').get();
-      for (const c of callsSnap.docs) {
-        const cd = c.data();
-        if (!q || JSON.stringify(cd).toLowerCase().includes(q.toLowerCase())) results.calls.push({ id: c.id, episodeId: ep.id, ...cd });
+      const epStr = JSON.stringify(data).toLowerCase();
+      const matchesEpisode = !q || epStr.includes(q.toLowerCase());
+
+      if (matchesEpisode) {
+        results.episodes.push({ id: ep.id, ...data });
+      }
+
+      // Only fetch calls from episodes that match (or if no query)
+      if (matchesEpisode && results.calls.length < MAX_TOTAL_RESULTS) {
+        const callsSnap = await ep.ref.collection('calls')
+          .orderBy('createdAt', 'desc')
+          .limit(MAX_CALLS_PER_EP)
+          .get();
+
+        for (const c of callsSnap.docs) {
+          if (results.calls.length >= MAX_TOTAL_RESULTS) break;
+          const cd = c.data();
+          if (!q || JSON.stringify(cd).toLowerCase().includes(q.toLowerCase())) {
+            results.calls.push({ id: c.id, episodeId: ep.id, ...cd });
+          }
+        }
       }
     }
     
-    auditLog('DATA_ACCESS', { action: 'search', projectId, queryLength: q ? q.length : 0 }, req);
+    auditLog('DATA_ACCESS', { action: 'search', projectId, queryLength: q ? q.length : 0, episodesSearched: episodesSnap.size }, req);
     return res.json({ ok: true, ...results });
   } catch (err) {
     return sendError(res, req, err);
@@ -470,10 +519,10 @@ router.post('/search', searchRules, async (req, res) => {
  * POST /episodes/get
  * Retrieves detailed information about a specific episode including its calls.
  */
-router.post('/episodes/get', explainRules, async (req, res) => {
+router.post('/episodes/get', getEpisodeBodyRules, async (req, res) => {
   const { uid } = req.user;
   const { projectId, episodeId } = req.body;
-  
+
   try {
     const epRef = await verifyEpisodeOwnership(uid, projectId, episodeId, req, res);
     if (!epRef) return;
@@ -486,6 +535,7 @@ router.post('/episodes/get', explainRules, async (req, res) => {
     const callsSnap = await callsCol.get();
     const calls = callsSnap.docs.map(c => ({ id: c.id, ...c.data() }));
 
+    auditLog('DATA_ACCESS', { action: 'get_episode', projectId, episodeId }, req);
     return res.json({
       ok: true,
       episode: {
@@ -499,39 +549,7 @@ router.post('/episodes/get', explainRules, async (req, res) => {
   }
 });
 
-/**
- * POST /episodes/list
- * Lists episodes for a project, sorted by startedAt descending.
- */
-router.post('/episodes/list', searchRules, async (req, res) => {
-  const { uid } = req.user;
-  const { projectId, limit: limitVal } = req.body;
-  
-  try {
-    const projectRef = await verifyProjectOwnership(uid, projectId, req, res);
-    if (!projectRef) return;
 
-    const episodesCol = db.collection('users').doc(uid).collection('projects').doc(projectId).collection('episodes');
-    
-    // Sort by startedAt desc
-    let q = episodesCol.orderBy('startedAt', 'desc');
-    
-    const parsedLimit = parseInt(limitVal, 10);
-    if (!isNaN(parsedLimit) && parsedLimit > 0) {
-      q = q.limit(parsedLimit);
-    }
-    
-    const snap = await q.get();
-    const episodes = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-    return res.json({
-      ok: true,
-      episodes
-    });
-  } catch (err) {
-    return sendError(res, req, err);
-  }
-});
 
 /**
  * POST /episodes/close
@@ -565,10 +583,11 @@ router.post('/episodes/close', closeEpisodeRules, async (req, res) => {
  * Retrieves the user's global AI provider settings.
  * Returns provider, hasKey flags (never the raw keys), and provider metadata.
  */
-router.post('/settings/get', async (req, res) => {
+router.post('/settings/get', settingsGetRules, async (req, res) => {
   const { uid } = req.user;
   try {
     const settingsDoc = await db.collection('users').doc(uid).collection('settings').doc('global').get();
+    auditLog('DATA_ACCESS', { action: 'get_settings' }, req);
     if (!settingsDoc.exists) {
       return res.json({
         ok: true,
@@ -596,18 +615,9 @@ router.post('/settings/get', async (req, res) => {
  * Updates the user's global AI provider settings.
  * Accepts provider selection and optional API keys.
  */
-router.post('/settings/update', async (req, res) => {
+router.post('/settings/update', settingsUpdateRules, async (req, res) => {
   const { uid } = req.user;
   const { aiProvider, geminiApiKey, openaiApiKey, anthropicApiKey } = req.body;
-
-  const allowedProviders = ['none', 'gemini', 'openai', 'anthropic'];
-  if (aiProvider && !allowedProviders.includes(aiProvider)) {
-    return res.status(400).json(
-      typedError(ErrorCodes.VALIDATION_ERROR, `Provider must be one of: ${allowedProviders.join(', ')}`, {
-        requestId: req.id,
-      })
-    );
-  }
 
   try {
     const update = {};
@@ -627,7 +637,8 @@ router.post('/settings/update', async (req, res) => {
 // GET /episodes/:episodeId - Get episode details
 router.get('/episodes/:episodeId', getEpisodeRules, async (req, res) => {
   const { uid } = req.user;
-  const { projectId, episodeId } = req.params;
+  const { episodeId } = req.params;
+  const { projectId } = req.query;
 
   try {
     // Verify project ownership
