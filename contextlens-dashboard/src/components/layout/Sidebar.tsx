@@ -76,7 +76,7 @@ export function Sidebar() {
   return (
     <aside
       style={{ width: '248px', minWidth: '248px' }}
-      className="flex flex-col h-full bg-[#0c1015] border-r border-cardBorder/60"
+      className="flex flex-col h-full bg-card border-r border-cardBorder/60"
     >
       {/* Logo */}
       <div className="px-4 py-5 border-b border-cardBorder/60">
@@ -88,7 +88,7 @@ export function Sidebar() {
               <circle cx="16" cy="16" r="15" fill="#111820" stroke="#4f98a3" strokeWidth="1.5" />
               <ellipse cx="16" cy="16" rx="10" ry="6" stroke="#4f98a3" strokeWidth="1.5" />
               <circle cx="16" cy="16" r="3.5" fill="#4f98a3" />
-              <circle cx="16" cy="16" r="1.5" fill="#0c1015" />
+              <circle cx="16" cy="16" r="1.5" fill="var(--color-card)" />
             </svg>
           </div>
           <div>
