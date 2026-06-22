@@ -17,10 +17,10 @@ export interface WatcherDeps {
   statusBar: any;
 }
 
-let lastBranch: string | null = null;
-let lastCommitMessage: string = '';
-let branchCooldown = false;
-let commitDebounce: ReturnType<typeof setTimeout> | null = null;
+const lastBranches: Record<string, string | null> = {};
+const lastCommitMessages: Record<string, string> = {};
+const branchCooldowns: Record<string, boolean> = {};
+const commitDebounces: Record<string, ReturnType<typeof setTimeout> | null> = {};
 // Fix 11: Guard against duplicate watcher registration
 let watchersInitialized = false;
 const deduplicator = new EventDeduplicator();
@@ -38,25 +38,29 @@ export async function startWatchers(
   // Fix 11: Prevent duplicate watcher registration
   if (watchersInitialized) return;
 
-  const workspaceRoot =
-    vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!workspaceRoot) return;
-
-  const gitDir = path.join(workspaceRoot, '.git');
-
-  if (!fs.existsSync(gitDir)) {
-    watchForGitInit(workspaceRoot, deps);
-    return;
-  }
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders || folders.length === 0) return;
 
   watchersInitialized = true;
-  watchBranch(gitDir, deps);
-  watchCommits(gitDir, deps);
+
+  for (const folder of folders) {
+    const workspaceRoot = folder.uri.fsPath;
+    const gitDir = path.join(workspaceRoot, '.git');
+
+    if (fs.existsSync(gitDir)) {
+      watchBranch(gitDir, workspaceRoot, deps);
+      watchCommits(gitDir, workspaceRoot, deps);
+      await deps.episodeStore.ensureProject(workspaceRoot);
+      await autoInitEpisode(deps, workspaceRoot);
+    } else {
+      watchForGitInit(workspaceRoot, deps);
+    }
+  }
+
   watchFileSaves(deps);
   watchFolderChanges(deps);
   startTokenRefresh(deps);
   startStaleEpisodeDetector(deps);
-  await autoInitEpisode(deps);
 }
 
 // ─── WATCHER 1: BRANCH ────────────────────────────────────
@@ -64,45 +68,46 @@ export async function startWatchers(
 // On branch switch: close episode, open new one with smart name
 // Cost: 0 Gemini, 1 Firestore write
 
-function watchBranch(gitDir: string, deps: WatcherDeps): void {
+function watchBranch(gitDir: string, workspaceRoot: string, deps: WatcherDeps): void {
   const headFile = path.join(gitDir, 'HEAD');
   if (!fs.existsSync(headFile)) return;
 
   const watcher = fs.watch(headFile, () => {
-    if (branchCooldown) return;
-    branchCooldown = true;
+    if (branchCooldowns[workspaceRoot]) return;
+    branchCooldowns[workspaceRoot] = true;
 
     // Wait 2s for rebase/merge to finish
     setTimeout(async () => {
-      branchCooldown = false;
+      branchCooldowns[workspaceRoot] = false;
       try {
-        const git = await GitContext.getContext();
+        const git = await GitContext.getContext(workspaceRoot);
         const branch = git.branch;
 
         if (!branch || branch === 'HEAD') return;
-        if (!lastBranch) { lastBranch = branch; return; }
-        if (branch === lastBranch) return;
+        if (!lastBranches[workspaceRoot]) { lastBranches[workspaceRoot] = branch; return; }
+        if (branch === lastBranches[workspaceRoot]) return;
 
-        lastBranch = branch;
+        lastBranches[workspaceRoot] = branch;
 
         // Close old episode silently (goes to sync queue)
         const episodeStore = deps.episodeStore;
-        if (episodeStore.getActiveEpisode()) {
-          await episodeStore.closeEpisodeSilent();
+        if (episodeStore.getActiveEpisode(workspaceRoot)) {
+          await episodeStore.closeEpisodeSilent(workspaceRoot);
         }
 
         // ENH-001: Smart Episode Naming
         // Generate a readable name from branch + last commit
-        const episodeName = await generateSmartEpisodeName(branch);
+        const episodeName = await generateSmartEpisodeName(branch, workspaceRoot);
 
         // Auto-create new episode for new branch
         // Goes through sync queue — not immediate
-        await episodeStore.autoCreateEpisode(episodeName, branch);
+        await episodeStore.autoCreateEpisode(episodeName, branch, workspaceRoot);
 
         deps.stateTreeProvider.refresh();
         deps.statusBar.render();
 
-        notifier.info(`Branch "${branch}" — episode started.`);
+        const folder = vscode.workspace.workspaceFolders?.find(f => f.uri.fsPath === workspaceRoot);
+        notifier.info(`Branch "${branch}" in ${folder?.name || 'project'} — episode started.`);
       } catch { /* silent */ }
     }, 2000);
   });
@@ -117,18 +122,18 @@ function watchBranch(gitDir: string, deps: WatcherDeps): void {
 // On commit: log to sync queue (no Gemini, no immediate send)
 // Cost: 0 Gemini, 1 Firestore write (batched)
 
-function watchCommits(gitDir: string, deps: WatcherDeps): void {
+function watchCommits(gitDir: string, workspaceRoot: string, deps: WatcherDeps): void {
   const file = path.join(gitDir, 'COMMIT_EDITMSG');
   if (!fs.existsSync(file)) return;
 
   try {
-    lastCommitMessage = fs.readFileSync(file, 'utf8').trim();
-  } catch { lastCommitMessage = ''; }
+    lastCommitMessages[workspaceRoot] = fs.readFileSync(file, 'utf8').trim();
+  } catch { lastCommitMessages[workspaceRoot] = ''; }
 
   const watcher = fs.watch(file, () => {
-    if (commitDebounce) clearTimeout(commitDebounce);
+    if (commitDebounces[workspaceRoot]) clearTimeout(commitDebounces[workspaceRoot]);
 
-    commitDebounce = setTimeout(async () => {
+    commitDebounces[workspaceRoot] = setTimeout(async () => {
       try {
         const raw = fs.readFileSync(file, 'utf8').trim();
         const message = raw
@@ -137,14 +142,14 @@ function watchCommits(gitDir: string, deps: WatcherDeps): void {
           .join('\n')
           .trim();
 
-        if (!message || message === lastCommitMessage) return;
-        lastCommitMessage = message;
+        if (!message || message === lastCommitMessages[workspaceRoot]) return;
+        lastCommitMessages[workspaceRoot] = message;
 
         const episodeStore = deps.episodeStore;
-        const episode = episodeStore.getActiveEpisode();
-        if (!episodeStore.getProjectId() || !episode) return;
+        const episode = episodeStore.getActiveEpisode(workspaceRoot);
+        if (!episodeStore.getProjectId(workspaceRoot) || !episode) return;
 
-        const git = await GitContext.getContext();
+        const git = await GitContext.getContext(workspaceRoot);
 
         // ENH-002: Diff Size Guard — truncate before syncing
         const safeDiff = guardDiffSize(git.diff || '');
@@ -166,7 +171,7 @@ function watchCommits(gitDir: string, deps: WatcherDeps): void {
           relatedFiles: [],
           diffSnapshot: redactedDiff,
           todoMatches: [],
-        });
+        }, workspaceRoot);
 
         deps.stateTreeProvider.refresh();
         deps.statusBar.render();
@@ -187,15 +192,14 @@ function watchCommits(gitDir: string, deps: WatcherDeps): void {
 // Cost: 0 Gemini, 1 Firestore write per 30s
 
 function watchFileSaves(deps: WatcherDeps): void {
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!workspaceRoot) return;
-
   deps.context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument(async (doc) => {
       try {
+        const folder = vscode.workspace.getWorkspaceFolder(doc.uri);
+        if (!folder) return;
+        const workspaceRoot = folder.uri.fsPath;
         const episodeStore = deps.episodeStore;
-        if (!episodeStore.getActiveEpisode()) return;
-        if (!doc.uri.fsPath.startsWith(workspaceRoot)) return;
+        if (!episodeStore.getActiveEpisode(workspaceRoot)) return;
 
         // Skip non-code
         const ext = path.extname(doc.uri.fsPath);
@@ -206,7 +210,7 @@ function watchFileSaves(deps: WatcherDeps): void {
         deduplicator.debounce('file_save', doc.uri.fsPath, () => {
           // Fix 13: Store workspace-relative paths, not absolute
           const relativePath = path.relative(workspaceRoot, doc.uri.fsPath);
-          episodeStore.addChangedFile(relativePath);
+          episodeStore.addChangedFile(relativePath, workspaceRoot);
           deps.stateTreeProvider.refresh();
         });
 
@@ -221,8 +225,18 @@ function watchFolderChanges(deps: WatcherDeps): void {
   deps.context.subscriptions.push(
     vscode.workspace.onDidChangeWorkspaceFolders(async (e) => {
       if (e.added.length > 0) {
-        await deps.episodeStore.ensureProject();
-        await autoInitEpisode(deps);
+        for (const folder of e.added) {
+          const workspaceRoot = folder.uri.fsPath;
+          const gitDir = path.join(workspaceRoot, '.git');
+          if (fs.existsSync(gitDir)) {
+            watchBranch(gitDir, workspaceRoot, deps);
+            watchCommits(gitDir, workspaceRoot, deps);
+            await deps.episodeStore.ensureProject(workspaceRoot);
+            await autoInitEpisode(deps, workspaceRoot);
+          } else {
+            watchForGitInit(workspaceRoot, deps);
+          }
+        }
         deps.stateTreeProvider.refresh();
         deps.statusBar.render();
       }
@@ -247,23 +261,27 @@ function watchForGitInit(workspaceRoot: string, deps: WatcherDeps): void {
 
 // ─── AUTO INIT ──────────────────────────────────────────────
 
-export async function autoInitEpisode(deps: WatcherDeps): Promise<void> {
+export async function autoInitEpisode(deps: WatcherDeps, workspaceRoot?: string): Promise<void> {
   try {
     const episodeStore = deps.episodeStore;
-    if (episodeStore.getActiveEpisode()) {
-      lastBranch = episodeStore.getActiveEpisode()?.branchName || null;
+    const root = workspaceRoot || episodeStore.getActiveWorkspaceRoot();
+    if (!root) return;
+
+    if (episodeStore.getActiveEpisode(root)) {
+      lastBranches[root] = episodeStore.getActiveEpisode(root)?.branchName || null;
       return;
     }
 
-    if (!episodeStore.getProjectId()) return;
+    if (!episodeStore.getProjectId(root)) return;
 
-    const git = await GitContext.getContext();
-    lastBranch = git.branch || null;
+    const git = await GitContext.getContext(root);
+    const branchName = git.branch || null;
+    lastBranches[root] = branchName;
 
-    if (lastBranch) {
+    if (branchName) {
       // ENH-001: Smart Episode Naming on auto-init too
-      const episodeName = await generateSmartEpisodeName(lastBranch);
-      await episodeStore.autoCreateEpisode(episodeName, lastBranch);
+      const episodeName = await generateSmartEpisodeName(branchName, root);
+      await episodeStore.autoCreateEpisode(episodeName, branchName, root);
     }
   } catch { /* silent */ }
 }
@@ -307,22 +325,28 @@ function startStaleEpisodeDetector(deps: WatcherDeps): void {
   const timer = setInterval(async () => {
     try {
       const episodeStore = deps.episodeStore;
-      const episode = episodeStore.getActiveEpisode();
-      if (!episode) return;
+      const folders = vscode.workspace.workspaceFolders;
+      if (!folders) return;
 
-      if (episodeStore.isStale()) {
-        const elapsed = episodeStore.getElapsedTime() || 'a long time';
-        const action = await vscode.window.showWarningMessage(
-          `ContextLens: Episode "${episode.name}" has been open for ${elapsed} with no activity. Close it?`,
-          'Close Episode',
-          'Keep Open'
-        );
+      for (const folder of folders) {
+        const root = folder.uri.fsPath;
+        const episode = episodeStore.getActiveEpisode(root);
+        if (!episode) continue;
 
-        if (action === 'Close Episode') {
-          await episodeStore.closeEpisode();
-          deps.stateTreeProvider.refresh();
-          deps.statusBar.render();
-          notifier.success('Stale episode closed.');
+        if (episodeStore.isStale(root)) {
+          const elapsed = episodeStore.getElapsedTime(root) || 'a long time';
+          const action = await vscode.window.showWarningMessage(
+            `ContextLens: Episode "${episode.name}" in ${folder.name} has been open for ${elapsed} with no activity. Close it?`,
+            'Close Episode',
+            'Keep Open'
+          );
+
+          if (action === 'Close Episode') {
+            await episodeStore.closeEpisode(root);
+            deps.stateTreeProvider.refresh();
+            deps.statusBar.render();
+            notifier.success(`Stale episode in ${folder.name} closed.`);
+          }
         }
       }
     } catch { /* silent */ }
@@ -343,7 +367,7 @@ function startStaleEpisodeDetector(deps: WatcherDeps): void {
  *   "fix/auth-bug"                        →  "Fix auth bug"
  *   "main"                                →  "main"
  */
-async function generateSmartEpisodeName(branch: string): Promise<string> {
+async function generateSmartEpisodeName(branch: string, workspaceRoot?: string): Promise<string> {
   // Clean up branch name
   let cleanBranch = branch
     .replace(/^(feat|fix|feature|bugfix|hotfix|chore|refactor|docs|style|test|ci|perf)\//i, '')
@@ -363,12 +387,12 @@ async function generateSmartEpisodeName(branch: string): Promise<string> {
 
   // Try to get the last commit message for extra context
   try {
-    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (workspaceRoot) {
+    const root = workspaceRoot || EpisodeStore.get().getActiveWorkspaceRoot();
+    if (root) {
       const { exec } = require('child_process');
       const { promisify } = require('util');
       const execAsync = promisify(exec);
-      const { stdout } = await execAsync('git log -1 --pretty=%s', { cwd: workspaceRoot });
+      const { stdout } = await execAsync('git log -1 --pretty=%s', { cwd: root });
       const lastCommit = stdout.trim();
 
       // Only append if the commit message is short and adds useful context

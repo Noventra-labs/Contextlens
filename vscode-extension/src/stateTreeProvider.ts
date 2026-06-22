@@ -102,6 +102,15 @@ export class StateTreeProvider implements vscode.TreeDataProvider<vscode.TreeIte
     callsItem.iconPath = new vscode.ThemeIcon('comment-discussion');
     items.push(callsItem);
 
+    // ENH-005: Episode time estimate
+    const elapsed = store.getElapsedTime();
+    if (elapsed) {
+      const timeItem = new vscode.TreeItem('Duration', vscode.TreeItemCollapsibleState.None);
+      timeItem.description = `Active for ${elapsed}`;
+      timeItem.iconPath = new vscode.ThemeIcon('clock');
+      items.push(timeItem);
+    }
+
     // ── Changed files ────────────────────────────────────────────────────
 
     if (episode.changedFiles.length > 0) {
