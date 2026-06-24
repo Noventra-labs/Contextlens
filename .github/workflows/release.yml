@@ -95,15 +95,13 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish Extension to Marketplace
-        if: steps.detect.outputs.ext_changed == 'true' && env.VSCE_PAT != ''
+      - name: Package Extension
+        if: steps.detect.outputs.ext_changed == 'true'
         working-directory: ./vscode-extension
         run: |
           npm ci
           npx @vscode/vsce package -o contextlens-extension.vsix
-          npx @vscode/vsce publish -p ${{ secrets.VSCE_PAT }}
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
 
       - name: Zip Documentation
         run: zip -r docs.zip docs/
