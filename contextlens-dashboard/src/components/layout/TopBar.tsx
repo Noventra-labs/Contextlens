@@ -62,7 +62,7 @@ export function TopBar() {
   }, [currentProject, projectId, episodeId, branchName, matches])
 
   return (
-    <header className="h-12 flex items-center justify-between px-6 border-b border-cardBorder/60 bg-surface flex-shrink-0">
+    <header className="h-12 flex items-center justify-between px-6 border-b border-cardBorder/20 bg-surface flex-shrink-0">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1.5 text-sm">
         {crumbs.map((crumb, i) => (

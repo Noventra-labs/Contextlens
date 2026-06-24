@@ -27,8 +27,24 @@
     ],
     "rewrites": [
       {
+        "source": "/api/auth/**",
+        "function": "authService"
+      },
+      {
+        "source": "/api/calls/log",
+        "function": "aiService"
+      },
+      {
+        "source": "/api/episodes/explain",
+        "function": "aiService"
+      },
+      {
+        "source": "/api/branches/summarize",
+        "function": "aiService"
+      },
+      {
         "source": "/api/**",
-        "function": "api"
+        "function": "coreService"
       },
       {
         "source": "**",

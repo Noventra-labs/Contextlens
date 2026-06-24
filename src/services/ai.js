@@ -1,7 +1,3 @@
-const { VertexAI } = require('@google-cloud/vertexai');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const OpenAI = require('openai');
-const Anthropic = require('@anthropic-ai/sdk');
 const { randomUUID } = require('crypto');
 const { redactText } = require('../lib/redaction');
 
@@ -23,6 +19,7 @@ function getVertexModel(modelName) {
   const resolvedModel = modelName || process.env.VERTEX_MODEL || 'gemini-1.5-pro';
   const cacheKey = `${project}:${location}:${resolvedModel}`;
   if (modelCache.has(cacheKey)) return modelCache.get(cacheKey);
+  const { VertexAI } = require('@google-cloud/vertexai');
   const vertex = new VertexAI({ project, location });
   const model = vertex.getGenerativeModel({ model: resolvedModel });
   modelCache.set(cacheKey, model);
@@ -149,6 +146,7 @@ async function callGemini(prompt, modelName, options = {}) {
   const resolvedModel = resolveModelForProvider(modelName, provider);
   
   if (provider === 'openai') {
+    const OpenAI = require('openai');
     const openai = new OpenAI({ apiKey: options.customApiKey });
     const { promise: timeoutPromise, timer } = createTimeoutPromise(timeoutMs);
     try {
@@ -179,6 +177,7 @@ async function callGemini(prompt, modelName, options = {}) {
   }
 
   if (provider === 'anthropic') {
+    const Anthropic = require('@anthropic-ai/sdk');
     const anthropic = new Anthropic({ apiKey: options.customApiKey });
     const { promise: timeoutPromise, timer } = createTimeoutPromise(timeoutMs);
     try {
@@ -211,6 +210,7 @@ async function callGemini(prompt, modelName, options = {}) {
   let model;
   const resolvedModelName = modelName || 'gemini-1.5-pro';
   if (options.customApiKey) {
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(options.customApiKey);
     model = genAI.getGenerativeModel({ model: resolvedModelName });
   } else {

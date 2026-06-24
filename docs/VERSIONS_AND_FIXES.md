@@ -170,9 +170,9 @@ Firebase Auth's `currentUser` persists in `localStorage` (browser) but VS Code e
 
 ### Web Dashboard
 
-- [ ] **Dark Mode:** Implement a complete dark mode theme for the dashboard for better developer accessibility.
-- [ ] **Refined Empty States:** Improve the UI feedback when a user connects but hasn't logged any projects or episodes yet.
-- [ ] **Sync Status Indicator:** Mirror the extension's status bar sync state in the dashboard header so users can see pending/syncing/synced status without opening VS Code.
+- [x] **Dark Mode:** Implement a complete dark mode theme for the dashboard for better developer accessibility. ✅ *(ThemeContext with light/dark/system, persisted to localStorage, toggle in TopBar)*
+- [x] **Refined Empty States:** Improve the UI feedback when a user connects but hasn't logged any projects or episodes yet. ✅ *(EmptyState component with contextual icons and setup guidance)*
+- [x] **Sync Status Indicator:** Mirror the extension's status bar sync state in the dashboard header so users can see pending/syncing/synced status without opening VS Code. ✅ *(Online/offline badge in TopBar with animated pulse)*
 
 ### Security & Architecture
 
