@@ -1,0 +1,52 @@
+name: Auto-Publish CLI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'contextlens-cli/**'
+
+permissions:
+  contents: write
+
+jobs:
+  auto-publish:
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          # Use default token, which has write permissions
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump Version
+        working-directory: ./contextlens-cli
+        run: |
+          npm version patch -m "chore(cli): bump version to %s [skip ci]"
+
+      - name: Push Version Bump
+        run: |
+          git push origin main
+
+      - name: Install CLI Dependencies
+        working-directory: ./contextlens-cli
+        run: npm ci
+
+      - name: Publish CLI to npm
+        working-directory: ./contextlens-cli
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
