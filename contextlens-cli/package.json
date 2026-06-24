@@ -1,0 +1,24 @@
+{
+  "name": "@noventra-labs/contextlens-cli",
+  "version": "1.1.1",
+  "description": "ContextLens CLI — manage projects, episodes, and AI calls from the terminal",
+  "bin": {
+    "contextlens": "bin/contextlens.js"
+  },
+  "main": "bin/contextlens.js",
+  "scripts": {
+    "start": "node bin/contextlens.js",
+    "link": "npm link"
+  },
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "commander": "^12.1.0",
+    "open": "^8.4.2",
+    "ora": "^5.4.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "license": "MIT",
+  "author": "ContextLens"
+}
