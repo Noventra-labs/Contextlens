@@ -47,3 +47,26 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
+
+  publish-cli:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install CLI Dependencies
+        working-directory: ./contextlens-cli
+        run: npm ci
+
+      - name: Publish CLI to npm
+        working-directory: ./contextlens-cli
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
