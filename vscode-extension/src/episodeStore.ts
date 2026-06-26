@@ -270,7 +270,7 @@ export class EpisodeStore {
     const root = workspaceRoot || this.getActiveWorkspaceRoot();
     if (!root) return;
 
-    const projectId = await this.ensureProject(root);
+    let projectId = await this.ensureProject(root);
     if (!projectId) {
       vscode.window.showErrorMessage('ContextLens: No project. Open a workspace first.');
       return;
@@ -302,7 +302,50 @@ export class EpisodeStore {
       };
       this.save();
     } catch (err: any) {
-      vscode.window.showErrorMessage(`ContextLens: Failed to create episode — ${err.message}`);
+      // Recovery check: if project was deleted/not found on server (404 / RESOURCE_NOT_FOUND)
+      const isNotFoundError = err.message && (
+        err.message.includes('not found') || 
+        err.message.includes('deleted') || 
+        err.message.includes('RESOURCE_NOT_FOUND') ||
+        err.message.includes('404')
+      );
+
+      if (isNotFoundError) {
+        delete this.projectIds[root];
+        delete this.projectNames[root];
+        this.save();
+
+        projectId = await this.ensureProject(root);
+        if (projectId) {
+          try {
+            const res = await ApiClient.createEpisode({
+              projectId,
+              label: trimmedName,
+              branchName,
+            });
+
+            const now = Date.now();
+            this.activeEpisodes[root] = {
+              id: res.episodeId,
+              name: trimmedName,
+              callCount: 0,
+              changedFiles: [],
+              note: '',
+              branchName,
+              startedAt: now,
+              lastActivityAt: now,
+            };
+            this.save();
+            return;
+          } catch (retryErr: any) {
+            vscode.window.showErrorMessage(`ContextLens: Failed to create episode — ${retryErr.message}`);
+          }
+        } else {
+          vscode.window.showErrorMessage('ContextLens: Project ID was invalid, and could not be re-created.');
+        }
+      } else {
+        vscode.window.showErrorMessage(`ContextLens: Failed to create episode — ${err.message}`);
+      }
     }
   }
 
@@ -498,6 +541,19 @@ export class EpisodeStore {
     const ep = this.activeEpisodes[root];
     if (ep) {
       ep.note = note.trim();
+      this.save();
+    }
+  }
+
+  /**
+   * Clears the cached project ID and name for the workspace, allowing re-resolution.
+   */
+  public clearProjectCache(workspaceRoot?: string): void {
+    const root = workspaceRoot || this.getActiveWorkspaceRoot();
+    if (root) {
+      delete this.projectIds[root];
+      delete this.projectNames[root];
+      delete this.activeEpisodes[root];
       this.save();
     }
   }
