@@ -149,11 +149,12 @@ async function login() {
             saveCredentials(creds);
 
             // Send success page
-            res.writeHead(200, { 'Content-Type': 'text/html' });
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
             res.end(`
               <!DOCTYPE html>
               <html>
               <head>
+                <meta charset="utf-8">
                 <title>ContextLens CLI — Authenticated</title>
                 <style>
                   body { font-family: -apple-system, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #08090c; color: #f3f4f6; }
