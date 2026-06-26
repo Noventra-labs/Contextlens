@@ -1,4 +1,4 @@
-# ContextLens VS Code Extension
+#  ContextLens VS Code Extension
 
 ContextLens is a powerful AI-driven developer companion that captures your coding intent and context as you work, providing seamless integration with the ContextLens Dashboard for deep project insights, active file context tracking, and automated summarization.
 

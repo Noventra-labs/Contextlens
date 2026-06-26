@@ -1,4 +1,4 @@
-#  ContextLens CLI
+#   ContextLens CLI
 
 > **Bridge the gap between codebase evolution and design intent directly from your terminal.**
 
