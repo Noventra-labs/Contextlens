@@ -124,7 +124,6 @@ export function BranchPage() {
               ep.branchName.toLowerCase().includes(searchQuery.toLowerCase())
             )}
             projectId={projectId ?? ''}
-            uid={user?.uid ?? ''}
           />
         )}
       </section>

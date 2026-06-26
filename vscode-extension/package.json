@@ -89,6 +89,10 @@
       {
         "command": "contextlens.autoSetupMcp",
         "title": "ContextLens: Auto-Setup MCP in AI Clients"
+      },
+      {
+        "command": "contextlens.reconnectProject",
+        "title": "ContextLens: Reconnect Project (Clear Cache)"
       }
     ],
     "viewsContainers": {

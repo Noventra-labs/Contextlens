@@ -158,6 +158,27 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // ── Command: Reconnect Project ───────────────────────────────────────────
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('contextlens.reconnectProject', async () => {
+      const store = EpisodeStore.get();
+      const root = store.getActiveWorkspaceRoot();
+      if (!root) {
+        notifier.warning('No active workspace root found.');
+        return;
+      }
+      store.clearProjectCache(root);
+      notifier.info('Project cache cleared. Re-resolving project...');
+      const projectId = await store.ensureProject(root);
+      if (projectId) {
+        notifier.success('Project reconnected successfully.');
+      } else {
+        notifier.error('Failed to reconnect project.');
+      }
+    })
+  );
+
   // ── Command: Close Episode ───────────────────────────────────────────────
 
   context.subscriptions.push(

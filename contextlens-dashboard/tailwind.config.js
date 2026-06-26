@@ -1,16 +1,18 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
-        surface: "#0d1117",
-        card: "#161b22",
-        cardBorder: "#30363d",
+        // Dark mode (default) colors
+        surface: "var(--color-surface)",
+        card: "var(--color-card)",
+        cardBorder: "var(--color-cardBorder)",
         primary: "#4f98a3",
         primaryLight: "#7ec8c8",
-        textPrimary: "#e6edf3",
-        textMuted: "#8b949e",
+        textPrimary: "var(--color-textPrimary)",
+        textMuted: "var(--color-textMuted)",
         diffAdd: "#1a4023",
         diffRemove: "#4a1a1a",
       },

@@ -1,16 +1,30 @@
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { Link, useParams, useMatches } from 'react-router-dom'
-import { Search, X, ChevronRight } from 'lucide-react'
+import { Search, X, ChevronRight, Sun, Moon } from 'lucide-react'
 import { useSearch } from '../../context/SearchContext'
 import { useAuth } from '../../context/AuthContext'
+import { useTheme } from '../../context/ThemeContext'
 import { useProjects } from '../../lib/firestoreHooks'
 
 export function TopBar() {
   const { user } = useAuth()
   const { searchQuery, setSearchQuery } = useSearch()
+  const { resolvedTheme, toggleTheme } = useTheme()
   const { projectId, episodeId, branchName } = useParams()
   const { data: projects } = useProjects(user?.uid ?? '')
   const matches = useMatches()
+
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
 
   const isSearchablePage = useMemo(() => {
     return !matches.some((m) => {
@@ -48,7 +62,7 @@ export function TopBar() {
   }, [currentProject, projectId, episodeId, branchName, matches])
 
   return (
-    <header className="h-12 flex items-center justify-between px-6 border-b border-cardBorder/60 bg-surface flex-shrink-0">
+    <header className="h-12 flex items-center justify-between px-6 border-b border-cardBorder/20 bg-surface flex-shrink-0">
       {/* Breadcrumb */}
       <nav className="flex items-center gap-1.5 text-sm">
         {crumbs.map((crumb, i) => (
@@ -93,6 +107,28 @@ export function TopBar() {
             )}
           </div>
         )}
+
+        {/* Sync Status Indicator */}
+        <span
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-all duration-150 ${
+            isOnline
+              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+              : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+          }`}
+          title={isOnline ? 'Dashboard synced with Firestore' : 'Dashboard is offline'}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+          {isOnline ? 'Synced' : 'Offline'}
+        </span>
+
+        {/* Theme toggle */}
+        <button
+          onClick={toggleTheme}
+          className="p-1.5 rounded-lg text-textMuted/50 hover:text-primary hover:bg-primary/10 transition-all duration-150"
+          title={resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          {resolvedTheme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+        </button>
       </div>
     </header>
   )

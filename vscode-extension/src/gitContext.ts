@@ -13,7 +13,7 @@ export interface GitContextData {
 }
 
 export class GitContext {
-  static async getContext(): Promise<GitContextData> {
+  static async getContext(workspaceRoot?: string): Promise<GitContextData> {
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders || workspaceFolders.length === 0) {
       return {
@@ -25,7 +25,15 @@ export class GitContext {
       };
     }
 
-    const cwd = workspaceFolders[0].uri.fsPath;
+    let cwd = workspaceRoot;
+    if (!cwd) {
+      const activeEditor = vscode.window.activeTextEditor;
+      if (activeEditor) {
+        const folder = vscode.workspace.getWorkspaceFolder(activeEditor.document.uri);
+        if (folder) cwd = folder.uri.fsPath;
+      }
+      if (!cwd) cwd = workspaceFolders[0].uri.fsPath;
+    }
     let isGitRepo = true;
     let branch = null;
     let diff = null;

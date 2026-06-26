@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
-import { Sparkles, Clock, FileCode, Zap } from 'lucide-react'
+import { Sparkles, Clock, FileCode, Zap, Download, Coins } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useEpisode, useCalls } from '../lib/firestoreHooks'
 import { explainDiff } from '../lib/api'
@@ -47,6 +47,66 @@ export function EpisodeDetailPage() {
     }
   }
 
+  // ENH-009: Aggregate token usage across all calls
+  const tokenStats = useMemo(() => {
+    if (!calls.length) return null
+    let totalInput = 0
+    let totalOutput = 0
+    for (const call of calls) {
+      totalInput += call.tokenUsage?.input || 0
+      totalOutput += call.tokenUsage?.output || 0
+    }
+    const total = totalInput + totalOutput
+    // Rough cost estimate: Gemini 1.5 Pro pricing ~$1.25/1M input, ~$5/1M output
+    const estimatedCost = (totalInput / 1_000_000) * 1.25 + (totalOutput / 1_000_000) * 5
+    return { totalInput, totalOutput, total, estimatedCost }
+  }, [calls])
+
+  // ENH-010: Export episode to Markdown
+  const handleExport = () => {
+    if (!episode) return
+    const lines: string[] = [
+      `# Episode: ${episode.label}`,
+      '',
+      `**Branch:** ${episode.branchName}`,
+      `**Status:** ${episode.status}`,
+      `**Started:** ${formatDate(episode.startedAt)}`,
+      episode.endedAt ? `**Ended:** ${formatDate(episode.endedAt)}` : '**Ended:** Still active',
+      episode.endedAt ? `**Duration:** ${timeDuration(episode.startedAt, episode.endedAt)}` : '',
+      `**AI Calls:** ${episode.callCount}`,
+      '',
+    ]
+
+    if (episode.changedFiles.length > 0) {
+      lines.push('## Changed Files', '', ...episode.changedFiles.map(f => `- \`${f}\``), '')
+    }
+
+    if (episode.manualNotes) {
+      lines.push('## Notes', '', episode.manualNotes, '')
+    }
+
+    if (calls.length > 0) {
+      lines.push('## AI Calls', '')
+      for (const call of calls) {
+        lines.push(`### ${call.intentTag || call.source || 'Call'} — ${formatDate(call.createdAt)}`)
+        lines.push('')
+        if (call.promptText) lines.push('**Prompt:**', '```', call.promptText, '```', '')
+        if (call.modelResponse) lines.push('**Response:**', '```', call.modelResponse, '```', '')
+        if (call.diffSnapshot) lines.push('**Diff:**', '```diff', call.diffSnapshot, '```', '')
+        lines.push(`*Model: ${call.modelName} · ${call.latencyMs}ms · ${call.tokenUsage?.input || 0} in / ${call.tokenUsage?.output || 0} out*`, '')
+        lines.push('---', '')
+      }
+    }
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `episode-${episode.label?.replace(/[^a-z0-9]/gi, '-').toLowerCase() || episodeId}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   if (epLoading) {
     return (
       <div className="max-w-3xl space-y-3 page-enter">
@@ -73,7 +133,19 @@ export function EpisodeDetailPage() {
     <div className="max-w-3xl page-enter">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-textPrimary mb-3">{episode.label}</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-textPrimary mb-3">{episode.label}</h1>
+          {/* ENH-010: Export to Markdown */}
+          <button
+            onClick={handleExport}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-cardBorder text-xs text-textMuted/60 font-semibold
+                       hover:text-primary hover:border-primary/30 hover:bg-primary/5
+                       active:scale-[0.97] transition-all duration-150"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Export
+          </button>
+        </div>
 
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <Badge text={episode.branchName} variant="branch" />
@@ -104,6 +176,19 @@ export function EpisodeDetailPage() {
             <>
               <div className="w-1 h-1 rounded-full bg-textMuted/20" />
               <span>Active {timeAgo(episode.startedAt)}</span>
+            </>
+          )}
+          {/* ENH-009: Token usage stats */}
+          {tokenStats && tokenStats.total > 0 && (
+            <>
+              <div className="w-1 h-1 rounded-full bg-textMuted/20" />
+              <span className="flex items-center gap-1">
+                <Coins className="w-3 h-3" />
+                <span className="tabular-nums">{tokenStats.total.toLocaleString()}</span> tokens
+                {tokenStats.estimatedCost > 0.001 && (
+                  <span className="text-primary/60">~${tokenStats.estimatedCost.toFixed(3)}</span>
+                )}
+              </span>
             </>
           )}
         </div>

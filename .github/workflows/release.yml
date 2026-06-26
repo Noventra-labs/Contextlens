@@ -1,46 +1,140 @@
-name: Release
+name: Auto Release & Publish
 
 on:
   push:
-    tags:
-      - 'v*' # Trigger on version tags, e.g., v1.0.0
+    branches:
+      - main
+    paths:
+      - 'contextlens-cli/**'
+      - 'vscode-extension/**'
+      - 'docs/**'
 
 permissions:
   contents: write
 
 jobs:
-  build-and-release:
+  release:
     runs-on: ubuntu-latest
-
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
 
-      - name: Install vsce
-        run: npm install -g @vscode/vsce
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Install Backend Dependencies
-        run: npm ci
-        
-      - name: Install Extension Dependencies
+      - name: Detect Changes
+        id: detect
+        run: |
+          if [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ]; then
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+          else
+            CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }})
+          fi
+          
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+          
+          CLI_CHANGED="false"
+          EXT_CHANGED="false"
+          
+          if echo "$CHANGED_FILES" | grep -q '^contextlens-cli/'; then
+            CLI_CHANGED="true"
+          fi
+          if echo "$CHANGED_FILES" | grep -q '^vscode-extension/'; then
+            EXT_CHANGED="true"
+          fi
+          
+          echo "cli_changed=$CLI_CHANGED" >> $GITHUB_OUTPUT
+          echo "ext_changed=$EXT_CHANGED" >> $GITHUB_OUTPUT
+
+      - name: Handle CLI Version Bump
+        id: cli
+        if: steps.detect.outputs.cli_changed == 'true'
+        working-directory: ./contextlens-cli
+        run: |
+          npm version patch -m "chore(cli): bump version to %s [skip ci]"
+          NEW_VER=$(node -p "require('./package.json').version")
+          echo "version=$NEW_VER" >> $GITHUB_OUTPUT
+          echo "tag=cli-v$NEW_VER" >> $GITHUB_OUTPUT
+
+      - name: Handle Extension Version Bump
+        id: ext
+        if: steps.detect.outputs.ext_changed == 'true'
         working-directory: ./vscode-extension
-        run: npm ci
+        run: |
+          npm version patch -m "chore(extension): bump version to %s [skip ci]"
+          NEW_VER=$(node -p "require('./package.json').version")
+          echo "version=$NEW_VER" >> $GITHUB_OUTPUT
+          echo "tag=ext-v$NEW_VER" >> $GITHUB_OUTPUT
 
-      - name: Package VS Code Extension
+      - name: Push Version Bumps
+        if: steps.detect.outputs.cli_changed == 'true' || steps.detect.outputs.ext_changed == 'true'
+        run: |
+          git pull --rebase origin main
+          git push origin main
+
+      - name: Publish CLI to npm
+        if: steps.detect.outputs.cli_changed == 'true' && env.NPM_TOKEN != ''
+        working-directory: ./contextlens-cli
+        run: |
+          npm ci
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Package Extension
+        if: steps.detect.outputs.ext_changed == 'true'
         working-directory: ./vscode-extension
-        run: vsce package -o contextlens-extension.vsix
+        run: |
+          npm ci
+          npx @vscode/vsce package -o contextlens-extension.vsix
+
 
       - name: Zip Documentation
         run: zip -r docs.zip docs/
 
-      - name: Create Release & Upload Assets
+      - name: Create Git Tags & Push
+        id: tagging
+        run: |
+          TAGS_TO_PUSH=""
+          PRIMARY_TAG=""
+          
+          if [ "${{ steps.detect.outputs.cli_changed }}" = "true" ]; then
+            git tag ${{ steps.cli.outputs.tag }}
+            TAGS_TO_PUSH="$TAGS_TO_PUSH ${{ steps.cli.outputs.tag }}"
+            PRIMARY_TAG="${{ steps.cli.outputs.tag }}"
+          fi
+          
+          if [ "${{ steps.detect.outputs.ext_changed }}" = "true" ]; then
+            git tag ${{ steps.ext.outputs.tag }}
+            TAGS_TO_PUSH="$TAGS_TO_PUSH ${{ steps.ext.outputs.tag }}"
+            PRIMARY_TAG="${{ steps.ext.outputs.tag }}"
+          fi
+          
+          if [ -n "$TAGS_TO_PUSH" ]; then
+            git push origin $TAGS_TO_PUSH
+          fi
+          
+          echo "primary_tag=$PRIMARY_TAG" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        if: steps.tagging.outputs.primary_tag != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.tagging.outputs.primary_tag }}
           files: |
             vscode-extension/contextlens-extension.vsix
             docs.zip

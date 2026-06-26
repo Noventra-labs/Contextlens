@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { db } = require('../firebase');
+const { db, admin } = require('../firebase');
 const { randomUUID } = require('crypto');
 const { callGemini } = require('../services/ai');
 const { explainDiffTemplate, branchSummaryTemplate } = require('../prompts');
@@ -308,15 +308,10 @@ router.post('/calls/log', aiLimiter, logCallRules, async (req, res) => {
       status: 'success'
     };
     
-    await callRef.set(callDoc);
-
-    // increment episode callCount (retry-safe transaction)
-    await db.runTransaction(async (t) => {
-      const snap = await t.get(epRef);
-      if (!snap.exists) return; // Already verified above, but safety check
-      const prev = snap.data().callCount || 0;
-      t.update(epRef, { callCount: prev + 1 });
-    });
+    const batch = db.batch();
+    batch.set(callRef, callDoc);
+    batch.update(epRef, { callCount: admin.firestore.FieldValue.increment(1) });
+    await batch.commit();
 
     const responseData = { ok: true, callId, modelName: aiResp.model, modelResponse: aiResp.text, latencyMs: skipAI ? 0 : latencyMs, saved: true };
 
@@ -544,6 +539,67 @@ router.post('/episodes/get', getEpisodeBodyRules, async (req, res) => {
       },
       calls
     });
+  } catch (err) {
+    return sendError(res, req, err);
+  }
+});
+
+/**
+ * POST /episodes/export
+ * Exports an episode's data as a formatted Markdown file.
+ */
+router.post('/episodes/export', getEpisodeBodyRules, async (req, res) => {
+  const { uid } = req.user;
+  const { projectId, episodeId } = req.body;
+
+  try {
+    const epRef = await verifyEpisodeOwnership(uid, projectId, episodeId, req, res);
+    if (!epRef) return;
+
+    const epDoc = await epRef.get();
+    const episode = epDoc.data();
+
+    // Fetch associated calls
+    const callsCol = epRef.collection('calls');
+    const callsSnap = await callsCol.orderBy('createdAt', 'asc').get();
+    const calls = callsSnap.docs.map(c => ({ id: c.id, ...c.data() }));
+
+    const lines = [
+      `# Episode: ${episode.label || 'Untitled Episode'}`,
+      '',
+      `**Branch:** ${episode.branchName || 'main'}`,
+      `**Status:** ${episode.status || 'closed'}`,
+      `**Started:** ${episode.startedAt ? episode.startedAt.toDate().toISOString() : ''}`,
+      episode.endedAt ? `**Ended:** ${episode.endedAt.toDate().toISOString()}` : '**Ended:** Still active',
+      `**AI Calls:** ${episode.callCount || 0}`,
+      '',
+    ];
+
+    if (episode.changedFiles && episode.changedFiles.length > 0) {
+      lines.push('## Changed Files', '', ...episode.changedFiles.map(f => `- \`${f}\``), '');
+    }
+
+    if (episode.manualNotes) {
+      lines.push('## Notes', '', episode.manualNotes, '');
+    }
+
+    if (calls.length > 0) {
+      lines.push('## AI Calls', '');
+      for (const call of calls) {
+        lines.push(`### ${call.intentTag || call.source || 'Call'} — ${call.createdAt ? call.createdAt.toDate().toISOString() : ''}`);
+        lines.push('');
+        if (call.promptText) lines.push('**Prompt:**', '```', call.promptText, '```', '');
+        if (call.modelResponse) lines.push('**Response:**', '```', call.modelResponse, '```', '');
+        if (call.diffSnapshot) lines.push('**Diff:**', '```diff', call.diffSnapshot, '```', '');
+        lines.push(`*Model: ${call.modelName || 'unknown'} · ${call.latencyMs || 0}ms · ${call.tokenUsage?.input || 0} in / ${call.tokenUsage?.output || 0} out*`, '');
+        lines.push('---', '');
+      }
+    }
+
+    auditLog('DATA_ACCESS', { action: 'export_episode', projectId, episodeId }, req);
+    res.setHeader('Content-Type', 'text/markdown');
+    res.setHeader('Content-Disposition', `attachment; filename="episode-${episode.label?.replace(/[^a-z0-9]/gi, '-').toLowerCase() || episodeId}.md"`);
+    return res.send(lines.join('\n'));
   } catch (err) {
     return sendError(res, req, err);
   }

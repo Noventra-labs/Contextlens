@@ -34,9 +34,9 @@ export interface Episode {
  */
 export class EpisodeStore {
   private static instance: EpisodeStore;
-  private activeEpisode: Episode | null = null;
-  private projectId: string | null = null;
-  private projectName: string | null = null;
+  private activeEpisodes: Record<string, Episode> = {};
+  private projectIds: Record<string, string> = {};
+  private projectNames: Record<string, string> = {};
   private syncEngine: SyncEngine | null = null;
   private onDidChangeEmitter = new vscode.EventEmitter<void>();
   public readonly onDidChange = this.onDidChangeEmitter.event;
@@ -80,39 +80,66 @@ export class EpisodeStore {
    * Loads state from the VS Code workspaceState.
    */
   private load() {
-    this.activeEpisode = this.context.workspaceState.get<Episode>('contextlens.activeEpisode') ?? null;
-    this.projectId = this.context.workspaceState.get<string>('contextlens.projectId') ?? null;
-    this.projectName = this.context.workspaceState.get<string>('contextlens.projectName') ?? null;
+    this.activeEpisodes = this.context.workspaceState.get<Record<string, Episode>>('contextlens.activeEpisodes') ?? {};
+    this.projectIds = this.context.workspaceState.get<Record<string, string>>('contextlens.projectIds') ?? {};
+    this.projectNames = this.context.workspaceState.get<Record<string, string>>('contextlens.projectNames') ?? {};
+
+    // For backwards compatibility:
+    const legacyEpisode = this.context.workspaceState.get<Episode>('contextlens.activeEpisode');
+    const legacyProjId = this.context.workspaceState.get<string>('contextlens.projectId');
+    const legacyProjName = this.context.workspaceState.get<string>('contextlens.projectName');
+    const folders = vscode.workspace.workspaceFolders;
+    if (folders && folders.length > 0) {
+      const root = folders[0].uri.fsPath;
+      if (legacyEpisode && !this.activeEpisodes[root]) this.activeEpisodes[root] = legacyEpisode;
+      if (legacyProjId && !this.projectIds[root]) this.projectIds[root] = legacyProjId;
+      if (legacyProjName && !this.projectNames[root]) this.projectNames[root] = legacyProjName;
+    }
   }
 
   private save() {
-    this.context.workspaceState.update('contextlens.activeEpisode', this.activeEpisode);
-    this.context.workspaceState.update('contextlens.projectId', this.projectId);
-    this.context.workspaceState.update('contextlens.projectName', this.projectName);
+    this.context.workspaceState.update('contextlens.activeEpisodes', this.activeEpisodes);
+    this.context.workspaceState.update('contextlens.projectIds', this.projectIds);
+    this.context.workspaceState.update('contextlens.projectNames', this.projectNames);
     this.onDidChangeEmitter.fire();
   }
 
   // ── Getters ────────────────────────────────────────────────────────────────
 
   /**
+   * Helper to get active workspace root folder path based on active editor or first folder.
+   */
+  public getActiveWorkspaceRoot(): string | null {
+    const activeEditor = vscode.window.activeTextEditor;
+    if (activeEditor) {
+      const folder = vscode.workspace.getWorkspaceFolder(activeEditor.document.uri);
+      if (folder) return folder.uri.fsPath;
+    }
+    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null;
+  }
+
+  /**
    * Returns the currently active development episode, or null if none.
    */
-  public getActiveEpisode(): Episode | null {
-    return this.activeEpisode;
+  public getActiveEpisode(workspaceRoot?: string): Episode | null {
+    const root = workspaceRoot || this.getActiveWorkspaceRoot();
+    return root ? (this.activeEpisodes[root] || null) : null;
   }
 
   /**
    * Returns the resolved project ID for the current workspace.
    */
-  public getProjectId(): string | null {
-    return this.projectId;
+  public getProjectId(workspaceRoot?: string): string | null {
+    const root = workspaceRoot || this.getActiveWorkspaceRoot();
+    return root ? (this.projectIds[root] || null) : null;
   }
 
   /**
    * Returns the display name of the current project.
    */
-  public getProjectName(): string | null {
-    return this.projectName;
+  public getProjectName(workspaceRoot?: string): string | null {
+    const root = workspaceRoot || this.getActiveWorkspaceRoot();
+    return root ? (this.projectNames[root] || null) : null;
   }
 
   /**
@@ -133,9 +160,12 @@ export class EpisodeStore {
    * Returns a human-readable string of how long the active episode has been running.
    * E.g. "2h 15m", "45m", "3d 1h".
    */
-  public getElapsedTime(): string | null {
-    if (!this.activeEpisode?.startedAt) return null;
-    const ms = Date.now() - this.activeEpisode.startedAt;
+  public getElapsedTime(workspaceRoot?: string): string | null {
+    const root = workspaceRoot || this.getActiveWorkspaceRoot();
+    if (!root) return null;
+    const ep = this.activeEpisodes[root];
+    if (!ep?.startedAt) return null;
+    const ms = Date.now() - ep.startedAt;
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
@@ -150,10 +180,13 @@ export class EpisodeStore {
    * Checks if the active episode is stale (open >24h with no recent activity).
    * "No recent activity" means no file saves, commits, or AI calls in the last 24h.
    */
-  public isStale(): boolean {
-    if (!this.activeEpisode?.lastActivityAt) return false;
+  public isStale(workspaceRoot?: string): boolean {
+    const root = workspaceRoot || this.getActiveWorkspaceRoot();
+    if (!root) return false;
+    const ep = this.activeEpisodes[root];
+    if (!ep?.lastActivityAt) return false;
     const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
-    return (Date.now() - this.activeEpisode.lastActivityAt) > STALE_THRESHOLD_MS;
+    return (Date.now() - ep.lastActivityAt) > STALE_THRESHOLD_MS;
   }
 
   // ── Project auto-resolve ───────────────────────────────────────────────────
@@ -164,15 +197,16 @@ export class EpisodeStore {
    * Gates on authentication.
    * @returns The project ID if resolved/created, otherwise null.
    */
-  public async ensureProject(): Promise<string | null> {
-    if (this.projectId) {
-      return this.projectId;
+  public async ensureProject(workspaceRoot?: string): Promise<string | null> {
+    const root = workspaceRoot || this.getActiveWorkspaceRoot();
+    if (!root) return null;
+
+    if (this.projectIds[root]) {
+      return this.projectIds[root];
     }
 
-    const folders = vscode.workspace.workspaceFolders;
-    if (!folders || folders.length === 0) {
-      return null;
-    }
+    const folder = vscode.workspace.workspaceFolders?.find(f => f.uri.fsPath === root);
+    if (!folder) return null;
 
     // ── Auth gate ──
     const authManager = getAuthManager();
@@ -182,16 +216,16 @@ export class EpisodeStore {
       return null;
     }
 
-    const folderName = folders[0].name;
+    const folderName = folder.name;
     let repoUrl: string | undefined;
     try {
-      const gitCtx = await GitContext.getContext();
+      const gitCtx = await GitContext.getContext(root);
       if (gitCtx.isGitRepo) {
         const { exec } = require('child_process');
         const { promisify } = require('util');
         const execAsync = promisify(exec);
         const { stdout } = await execAsync('git remote get-url origin', {
-          cwd: folders[0].uri.fsPath,
+          cwd: root,
         });
         repoUrl = stdout.trim();
       }
@@ -205,12 +239,12 @@ export class EpisodeStore {
         repoUrl,
         localWorkspaceName: folderName,
       });
-      this.projectId = res.projectId;
-      this.projectName = folderName;
+      this.projectIds[root] = res.projectId;
+      this.projectNames[root] = folderName;
       this.save();
-      return this.projectId;
+      return res.projectId;
     } catch (err: any) {
-      vscode.window.showErrorMessage(`ContextLens: Failed to create project — ${err.message}`);
+      vscode.window.showErrorMessage(`ContextLens: Failed to create project for ${folderName} — ${err.message}`);
       return null;
     }
   }
@@ -221,8 +255,9 @@ export class EpisodeStore {
    * Creates a new episode on the backend and sets it as the active one.
    * This is a blocking call typically triggered by a user action.
    * @param name The descriptive label for the episode.
+   * @param workspaceRoot Optional workspace root folder path.
    */
-  public async createEpisode(name: string): Promise<void> {
+  public async createEpisode(name: string, workspaceRoot?: string): Promise<void> {
     const trimmedName = name.trim();
     if (!trimmedName) {
       vscode.window.showErrorMessage('ContextLens: Episode name cannot be empty.');
@@ -232,14 +267,20 @@ export class EpisodeStore {
     // ── Auth gate ──
     await getAuthManager().ensureSignedIn();
 
-    const projectId = await this.ensureProject();
+    const root = workspaceRoot || this.getActiveWorkspaceRoot();
+    if (!root) return;
+
+    let projectId = await this.ensureProject(root);
     if (!projectId) {
       vscode.window.showErrorMessage('ContextLens: No project. Open a workspace first.');
       return;
     }
 
-    const gitCtx = await GitContext.getContext();
-    const branchName = gitCtx.branch || 'main';
+    let branchName = 'main';
+    try {
+      const gitCtx = await GitContext.getContext(root);
+      if (gitCtx.branch) branchName = gitCtx.branch;
+    } catch {}
 
     try {
       const res = await ApiClient.createEpisode({
@@ -249,7 +290,7 @@ export class EpisodeStore {
       });
 
       const now = Date.now();
-      this.activeEpisode = {
+      this.activeEpisodes[root] = {
         id: res.episodeId,
         name: trimmedName,
         callCount: 0,
@@ -261,25 +302,74 @@ export class EpisodeStore {
       };
       this.save();
     } catch (err: any) {
-      vscode.window.showErrorMessage(`ContextLens: Failed to create episode — ${err.message}`);
+      // Recovery check: if project was deleted/not found on server (404 / RESOURCE_NOT_FOUND)
+      const isNotFoundError = err.message && (
+        err.message.includes('not found') || 
+        err.message.includes('deleted') || 
+        err.message.includes('RESOURCE_NOT_FOUND') ||
+        err.message.includes('404')
+      );
+
+      if (isNotFoundError) {
+        delete this.projectIds[root];
+        delete this.projectNames[root];
+        this.save();
+
+        projectId = await this.ensureProject(root);
+        if (projectId) {
+          try {
+            const res = await ApiClient.createEpisode({
+              projectId,
+              label: trimmedName,
+              branchName,
+            });
+
+            const now = Date.now();
+            this.activeEpisodes[root] = {
+              id: res.episodeId,
+              name: trimmedName,
+              callCount: 0,
+              changedFiles: [],
+              note: '',
+              branchName,
+              startedAt: now,
+              lastActivityAt: now,
+            };
+            this.save();
+            return;
+          } catch (retryErr: any) {
+            vscode.window.showErrorMessage(`ContextLens: Failed to create episode — ${retryErr.message}`);
+          }
+        } else {
+          vscode.window.showErrorMessage('ContextLens: Project ID was invalid, and could not be re-created.');
+        }
+      } else {
+        vscode.window.showErrorMessage(`ContextLens: Failed to create episode — ${err.message}`);
+      }
     }
   }
 
   /**
    * Closes the currently active episode.
    * Sends a blocking request to the backend.
+   * @param workspaceRoot Optional workspace root folder path.
    */
-  public async closeEpisode(): Promise<void> {
-    if (!this.activeEpisode || !this.projectId) {
-      this.activeEpisode = null;
+  public async closeEpisode(workspaceRoot?: string): Promise<void> {
+    const root = workspaceRoot || this.getActiveWorkspaceRoot();
+    if (!root) return;
+    const ep = this.activeEpisodes[root];
+    const projId = this.projectIds[root];
+
+    if (!ep || !projId) {
+      delete this.activeEpisodes[root];
       this.save();
       return;
     }
 
     try {
       await ApiClient.closeEpisode({
-        projectId: this.projectId,
-        episodeId: this.activeEpisode.id,
+        projectId: projId,
+        episodeId: ep.id,
       });
     } catch (err: any) {
       // Gracefully handle case where project or episode was deleted on server (404)
@@ -290,33 +380,42 @@ export class EpisodeStore {
       }
     }
 
-    this.activeEpisode = null;
+    delete this.activeEpisodes[root];
     this.save();
   }
 
   /**
    * Closes the active episode asynchronously via the SyncEngine.
    * Useful for automatic triggers where blocking is undesirable.
+   * @param workspaceRoot Optional workspace root folder path.
    */
-  public async closeEpisodeSilent(): Promise<void> {
-    if (!this.activeEpisode || !this.projectId) {
-      this.activeEpisode = null;
+  public async closeEpisodeSilent(workspaceRoot?: string): Promise<void> {
+    const root = workspaceRoot || this.getActiveWorkspaceRoot();
+    if (!root) return;
+    const ep = this.activeEpisodes[root];
+    const projId = this.projectIds[root];
+
+    if (!ep || !projId) {
+      delete this.activeEpisodes[root];
       this.save();
       return;
     }
 
+    // ENH-003: Capture context snapshot before closing
+    this.captureContextSnapshot(ep.branchName);
+
     this.syncEngine?.enqueue({
       type: 'episode_close',
       endpoint: '/episodes/close',
-      projectId: this.projectId,
-      episodeId: this.activeEpisode.id,
+      projectId: projId,
+      episodeId: ep.id,
       payload: {
-        projectId: this.projectId,
-        episodeId: this.activeEpisode.id,
+        projectId: projId,
+        episodeId: ep.id,
       }
     });
 
-    this.activeEpisode = null;
+    delete this.activeEpisodes[root];
     this.save();
   }
 
@@ -325,10 +424,15 @@ export class EpisodeStore {
    * Assigns a temporary ID locally which is reconciled on the backend.
    * @param name The label for the episode.
    * @param branchName The branch name to associate.
+   * @param workspaceRoot Optional workspace root folder path.
    */
-  public async autoCreateEpisode(name: string, branchName: string): Promise<void> {
+  public async autoCreateEpisode(name: string, branchName: string, workspaceRoot?: string): Promise<void> {
     const trimmedName = name.trim();
-    if (!this.projectId || !trimmedName) return;
+    const root = workspaceRoot || this.getActiveWorkspaceRoot();
+    if (!root || !trimmedName) return;
+
+    const projId = await this.ensureProject(root);
+    if (!projId) return;
 
     // Use a real UUID v4 immediately so backend validation (which requires UUID
     // format) never rejects the episodeId when the SyncEngine eventually flushes.
@@ -339,10 +443,10 @@ export class EpisodeStore {
     this.syncEngine?.enqueue({
       type: 'episode_create',
       endpoint: '/episodes/create',
-      projectId: this.projectId,
+      projectId: projId,
       episodeId: localEpisodeId,
       payload: {
-        projectId: this.projectId,
+        projectId: projId,
         episodeId: localEpisodeId,
         label: trimmedName,
         branchName: branchName || 'main',
@@ -350,7 +454,7 @@ export class EpisodeStore {
     });
 
     const now = Date.now();
-    this.activeEpisode = {
+    this.activeEpisodes[root] = {
       id: localEpisodeId,
       name: trimmedName,
       callCount: 0,
@@ -361,38 +465,50 @@ export class EpisodeStore {
       lastActivityAt: now,
     };
     this.save();
+
+    // ENH-003: Restore context snapshot if one exists for this branch
+    this.restoreContextSnapshot(branchName || 'main');
   }
 
   /**
    * Enqueues an AI call log or git action to the SyncEngine.
    * Automatically injects project and episode context.
    * @param payload The data to be logged.
+   * @param workspaceRoot Optional workspace root folder path.
    */
-  public enqueueCall(payload: any): void {
-    if (!this.projectId || !this.activeEpisode) return;
+  public enqueueCall(payload: any, workspaceRoot?: string): void {
+    const root = workspaceRoot || this.getActiveWorkspaceRoot();
+    if (!root) return;
+    const ep = this.activeEpisodes[root];
+    const projId = this.projectIds[root];
+    if (!ep || !projId) return;
 
     this.syncEngine?.enqueue({
       type: 'call',
       endpoint: '/calls/log',
-      projectId: this.projectId,
-      episodeId: this.activeEpisode.id,
+      projectId: projId,
+      episodeId: ep.id,
       payload: {
         ...payload,
-        projectId: this.projectId,
-        episodeId: this.activeEpisode.id,
+        projectId: projId,
+        episodeId: ep.id,
       }
     });
 
-    this.incrementCallCount();
+    this.incrementCallCount(root);
   }
 
   /**
    * Increments the call counter for the active episode and persists the state.
+   * @param workspaceRoot Optional workspace root folder path.
    */
-  public incrementCallCount() {
-    if (this.activeEpisode) {
-      this.activeEpisode.callCount += 1;
-      this.activeEpisode.lastActivityAt = Date.now();
+  public incrementCallCount(workspaceRoot?: string) {
+    const root = workspaceRoot || this.getActiveWorkspaceRoot();
+    if (!root) return;
+    const ep = this.activeEpisodes[root];
+    if (ep) {
+      ep.callCount += 1;
+      ep.lastActivityAt = Date.now();
       this.save();
     }
   }
@@ -401,11 +517,15 @@ export class EpisodeStore {
    * Adds a file path to the list of changed files for the current episode.
    * Prevents duplicates and triggers persistence.
    * @param filePath Workspace-relative or absolute path.
+   * @param workspaceRoot Optional workspace root folder path.
    */
-  public addChangedFile(filePath: string) {
-    if (this.activeEpisode && !this.activeEpisode.changedFiles.includes(filePath)) {
-      this.activeEpisode.changedFiles.push(filePath);
-      this.activeEpisode.lastActivityAt = Date.now();
+  public addChangedFile(filePath: string, workspaceRoot?: string) {
+    const root = workspaceRoot || this.getActiveWorkspaceRoot();
+    if (!root) return;
+    const ep = this.activeEpisodes[root];
+    if (ep && !ep.changedFiles.includes(filePath)) {
+      ep.changedFiles.push(filePath);
+      ep.lastActivityAt = Date.now();
       this.save();
     }
   }
@@ -413,11 +533,76 @@ export class EpisodeStore {
   /**
    * Updates the note or metadata for the active episode.
    * @param note The new note string.
+   * @param workspaceRoot Optional workspace root folder path.
    */
-  public updateNote(note: string) {
-    if (this.activeEpisode) {
-      this.activeEpisode.note = note.trim();
+  public updateNote(note: string, workspaceRoot?: string) {
+    const root = workspaceRoot || this.getActiveWorkspaceRoot();
+    if (!root) return;
+    const ep = this.activeEpisodes[root];
+    if (ep) {
+      ep.note = note.trim();
       this.save();
     }
+  }
+
+  /**
+   * Clears the cached project ID and name for the workspace, allowing re-resolution.
+   */
+  public clearProjectCache(workspaceRoot?: string): void {
+    const root = workspaceRoot || this.getActiveWorkspaceRoot();
+    if (root) {
+      delete this.projectIds[root];
+      delete this.projectNames[root];
+      delete this.activeEpisodes[root];
+      this.save();
+    }
+  }
+
+  // ── ENH-003: Context Snapshot ────────────────────────────────────────────
+
+  /**
+   * Captures current editor state: open file paths and cursor positions.
+   * Stored in workspaceState keyed by branch name.
+   */
+  private captureContextSnapshot(branchName: string): void {
+    try {
+      const editors = vscode.window.visibleTextEditors;
+      const snapshot = editors.map(editor => ({
+        filePath: editor.document.uri.fsPath,
+        cursorLine: editor.selection.active.line,
+        cursorChar: editor.selection.active.character,
+      }));
+
+      const snapshots = this.context.workspaceState.get<Record<string, any[]>>('contextlens.snapshots') || {};
+      snapshots[branchName] = snapshot;
+      this.context.workspaceState.update('contextlens.snapshots', snapshots);
+    } catch { /* non-critical */ }
+  }
+
+  /**
+   * Restores editor state from a previously captured snapshot for the given branch.
+   * Opens files and sets cursor positions.
+   */
+  private async restoreContextSnapshot(branchName: string): Promise<void> {
+    try {
+      const snapshots = this.context.workspaceState.get<Record<string, any[]>>('contextlens.snapshots') || {};
+      const snapshot = snapshots[branchName];
+      if (!snapshot || snapshot.length === 0) return;
+
+      for (const entry of snapshot) {
+        try {
+          const uri = vscode.Uri.file(entry.filePath);
+          const doc = await vscode.workspace.openTextDocument(uri);
+          const editor = await vscode.window.showTextDocument(doc, { preview: false, preserveFocus: true });
+          const pos = new vscode.Position(entry.cursorLine || 0, entry.cursorChar || 0);
+          editor.selection = new vscode.Selection(pos, pos);
+          editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+        } catch { /* file may no longer exist */ }
+      }
+
+      // Clear snapshot after restore (one-time use)
+      delete snapshots[branchName];
+      this.context.workspaceState.update('contextlens.snapshots', snapshots);
+    } catch { /* non-critical */ }
   }
 }
