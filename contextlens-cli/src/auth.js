@@ -1,9 +1,9 @@
 const http = require('http');
 const https = require('https');
-const { saveCredentials, loadCredentials, clearCredentials, getApiBase } = require('./utils/config');
+const { saveCredentials, loadCredentials, clearCredentials, getApiBase, loadConfig } = require('./utils/config');
 
 // Firebase Web API key (same as used by the VS Code extension and dashboard)
-const FIREBASE_API_KEY = 'AIzaSyC_hR3yJiHMlsBbjPCDaGOLvSSz-1gXj3s';
+const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY || loadConfig().firebaseApiKey || 'AIzaSyAQ2U7k1Z1h0myROPoj9upUMxJ-r_ZZ3ME';
 
 /**
  * Perform a raw HTTPS request. Returns { status, body }.
