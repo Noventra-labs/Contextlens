@@ -1,14 +1,21 @@
 import * as http from 'http';
+import * as fs from 'fs';
+import * as path from 'path';
 import { EpisodeStore } from './episodeStore';
 import { getAuthManager } from './auth';
 import { ApiClient } from './apiClient';
 import { GitContext } from './gitContext';
 import { createHash, randomBytes } from 'crypto';
+import { ToolRegistry } from './mcp/registry/ToolRegistry';
+import { McpPermission } from './mcp/permissions';
+
+// Import all tools — side-effect registers them into the registry
+import './mcp/tools/index';
 
 let server: http.Server | null = null;
 const PORT = 3012;
 
-// Fix 4: Generate a per-session local secret for MCP auth.
+// Per-session local secret for MCP auth.
 // Only the bridge process (which reads this secret) can make requests.
 let localSecret: string = '';
 
@@ -19,8 +26,18 @@ export function getMcpSecret(): string {
 export function startMcpServer() {
   if (server) return;
 
-  // Fix 4: Generate a random secret for this session
+  // Generate a random secret for this session
   localSecret = randomBytes(32).toString('hex');
+
+  // Save secret for local bridge access
+  try {
+    const secretPath = path.join(__dirname, '..', '.mcp-secret.json');
+    fs.writeFileSync(secretPath, JSON.stringify({ secret: localSecret }), 'utf8');
+  } catch (err: any) {
+    console.error('[ContextLens] Failed to save MCP secret file:', err);
+  }
+
+  const registry = ToolRegistry.getInstance();
 
   server = http.createServer(async (req, res) => {
     // Enable JSON responses
@@ -37,7 +54,7 @@ export function startMcpServer() {
       return;
     }
 
-    // Fix 4: Validate local secret on every request
+    // Validate local secret on every request
     const requestSecret = req.headers['x-mcp-secret'] as string;
     if (!requestSecret || requestSecret !== localSecret) {
       res.writeHead(401);
@@ -48,10 +65,33 @@ export function startMcpServer() {
     const url = new URL(req.url || '', `http://${req.headers.host}`);
 
     try {
+      // ── Registry-powered tool dispatch ──────────────────────────────────
+
+      if (req.method === 'POST' && url.pathname === '/mcp/tools/list') {
+        const tools = registry.listTools();
+        res.writeHead(200);
+        res.end(JSON.stringify({ tools }));
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/mcp/tools/call') {
+        const body = await getBody(req);
+        const { name, arguments: args } = body;
+        const result = await registry.callTool(name, args || {}, {
+          clientId: req.headers['x-mcp-client'] as string,
+          grantedPermissions: Object.values(McpPermission),
+        });
+        res.writeHead(200);
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      // ── Legacy endpoints (backward compatibility) ───────────────────────
+      // These remain so existing bridge versions continue working.
+
       if (req.method === 'GET' && url.pathname === '/status') {
         const store = EpisodeStore.get();
         const authManager = getAuthManager();
-        // Fix 3: Never expose raw tokens. Return auth state only.
         const isAuthenticated = authManager ? !!(await authManager.getIdToken()) : false;
 
         res.writeHead(200);
@@ -229,6 +269,14 @@ export function stopMcpServer() {
   if (server) {
     server.close();
     server = null;
+  }
+  try {
+    const secretPath = path.join(__dirname, '..', '.mcp-secret.json');
+    if (fs.existsSync(secretPath)) {
+      fs.unlinkSync(secretPath);
+    }
+  } catch (err: any) {
+    console.error('[ContextLens] Failed to delete MCP secret file:', err);
   }
 }
 
