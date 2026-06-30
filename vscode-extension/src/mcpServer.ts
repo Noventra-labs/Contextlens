@@ -1,26 +1,64 @@
 import * as http from 'http';
+import * as fs from 'fs';
+import * as path from 'path';
 import { EpisodeStore } from './episodeStore';
 import { getAuthManager } from './auth';
 import { ApiClient } from './apiClient';
 import { GitContext } from './gitContext';
 import { createHash, randomBytes } from 'crypto';
+import { ToolRegistry } from './mcp/registry/ToolRegistry';
+import { McpPermission } from './mcp/permissions';
+import { TokenManager } from './mcp/auth/tokenManager';
+import { ClientIdentityTracker } from './mcp/auth/clientIdentity';
+import { RateLimiter } from './mcp/security/rateLimiter';
+import { validateInput, McpErrorCode } from './mcp/security/validator';
+import { listResources, readResource } from './mcp/resources/index';
+import { listPrompts, getPrompt } from './mcp/prompts/index';
+import { NotificationManager, McpNotificationType } from './mcp/notifications/notificationManager';
+import { SessionManager } from './mcp/session/sessionManager';
+import { runHealthCheck } from './mcp/health/healthCheck';
+import { getErrorCatalog } from './mcp/errors/mcpErrors';
+
+// Import all tools — side-effect registers them into the registry
+import './mcp/tools/index';
 
 let server: http.Server | null = null;
 const PORT = 3012;
 
-// Fix 4: Generate a per-session local secret for MCP auth.
-// Only the bridge process (which reads this secret) can make requests.
-let localSecret: string = '';
+// Security infrastructure
+const tokenManager = new TokenManager();
+const clientTracker = new ClientIdentityTracker();
+const rateLimiter = new RateLimiter();
 
 export function getMcpSecret(): string {
-  return localSecret;
+  return tokenManager.getToken() || '';
+}
+
+/**
+ * Write current token to secret file for bridge access.
+ */
+function writeSecretFile(token: string): void {
+  try {
+    const secretPath = path.join(__dirname, '..', '.mcp-secret.json');
+    fs.writeFileSync(secretPath, JSON.stringify({ secret: token }), 'utf8');
+  } catch (err: any) {
+    console.error('[ContextLens] Failed to save MCP secret file:', err);
+  }
 }
 
 export function startMcpServer() {
   if (server) return;
 
-  // Fix 4: Generate a random secret for this session
-  localSecret = randomBytes(32).toString('hex');
+  // Start rotating token manager
+  const initialToken = tokenManager.start();
+  writeSecretFile(initialToken);
+
+  // Update secret file on each rotation
+  tokenManager.onRotate((newToken) => {
+    writeSecretFile(newToken);
+  });
+
+  const registry = ToolRegistry.getInstance();
 
   server = http.createServer(async (req, res) => {
     // Enable JSON responses
@@ -29,7 +67,7 @@ export function startMcpServer() {
     // CORS headers for safety
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-MCP-Secret');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-MCP-Secret, X-MCP-Client');
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -37,21 +75,180 @@ export function startMcpServer() {
       return;
     }
 
-    // Fix 4: Validate local secret on every request
+    // Validate rotating token on every request
     const requestSecret = req.headers['x-mcp-secret'] as string;
-    if (!requestSecret || requestSecret !== localSecret) {
+    if (!tokenManager.validate(requestSecret)) {
       res.writeHead(401);
-      res.end(JSON.stringify({ error: 'Unauthorized — invalid or missing MCP secret' }));
+      res.end(JSON.stringify({
+        error: 'Unauthorized — invalid or missing MCP secret',
+        code: McpErrorCode.UNAUTHORIZED
+      }));
+      return;
+    }
+
+    // Track client identity
+    const { clientId, version } = clientTracker.parseFromHeaders(req.headers as Record<string, string | string[] | undefined>);
+    clientTracker.recordConnection(clientId, version);
+
+    // Rate limiting
+    const rateResult = rateLimiter.checkLimit(clientId);
+    res.setHeader('X-RateLimit-Remaining', String(rateResult.remaining));
+    res.setHeader('X-RateLimit-Limit', String(rateResult.limit));
+    if (!rateResult.allowed) {
+      res.writeHead(429);
+      res.setHeader('Retry-After', String(Math.ceil((rateResult.retryAfterMs || 1000) / 1000)));
+      res.end(JSON.stringify({
+        error: 'Rate limit exceeded',
+        code: McpErrorCode.RATE_LIMITED,
+        retryAfterMs: rateResult.retryAfterMs
+      }));
       return;
     }
 
     const url = new URL(req.url || '', `http://${req.headers.host}`);
 
     try {
+      // ── Registry-powered tool dispatch ──────────────────────────────────────────
+
+      if (req.method === 'POST' && url.pathname === '/mcp/tools/list') {
+        const tools = registry.listTools();
+        res.writeHead(200);
+        res.end(JSON.stringify({ tools }));
+        return;
+      }
+
+      // ── Resources ──────────────────────────────────────────────────────────
+
+      if (req.method === 'POST' && url.pathname === '/mcp/resources/list') {
+        const resources = listResources();
+        res.writeHead(200);
+        res.end(JSON.stringify({ resources }));
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/mcp/resources/read') {
+        const body = await getBody(req);
+        const result = await readResource(body.uri);
+        if (!result) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: `Resource not found: ${body.uri}` }));
+          return;
+        }
+        res.writeHead(200);
+        res.end(JSON.stringify({ contents: [result] }));
+        return;
+      }
+
+      // ── Prompts ────────────────────────────────────────────────────────────
+
+      if (req.method === 'POST' && url.pathname === '/mcp/prompts/list') {
+        const prompts = listPrompts();
+        res.writeHead(200);
+        res.end(JSON.stringify({ prompts }));
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/mcp/prompts/get') {
+        const body = await getBody(req);
+        const messages = getPrompt(body.name, body.arguments || {});
+        if (!messages) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: `Prompt not found: ${body.name}` }));
+          return;
+        }
+        res.writeHead(200);
+        res.end(JSON.stringify({ description: body.name, messages }));
+        return;
+      }
+
+      // ── Notifications ───────────────────────────────────────────────────────
+
+      if (req.method === 'POST' && url.pathname === '/mcp/notifications/recent') {
+        const body = await getBody(req);
+        const notifMgr = NotificationManager.getInstance();
+        const notifications = notifMgr.getRecent(body.since, body.limit);
+        res.writeHead(200);
+        res.end(JSON.stringify({ notifications }));
+        return;
+      }
+
+      // ── Session ────────────────────────────────────────────────────────────
+
+      if (req.method === 'GET' && url.pathname === '/mcp/session') {
+        const store = EpisodeStore.get();
+        const sessionMgr = SessionManager.getInstance();
+        const state = sessionMgr.getState(
+          null, // workspace
+          store.getProjectId(),
+          store.getActiveEpisode()?.id
+        );
+        res.writeHead(200);
+        res.end(JSON.stringify(state));
+        return;
+      }
+
+      // ── Health Check ────────────────────────────────────────────────────────
+
+      if (req.method === 'GET' && url.pathname === '/mcp/health') {
+        const report = await runHealthCheck();
+        res.writeHead(report.overall === 'unhealthy' ? 503 : 200);
+        res.end(JSON.stringify(report));
+        return;
+      }
+
+      // ── Error Catalog ───────────────────────────────────────────────────────
+
+      if (req.method === 'GET' && url.pathname === '/mcp/errors') {
+        res.writeHead(200);
+        res.end(JSON.stringify({ errors: getErrorCatalog() }));
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/mcp/tools/call') {
+        const body = await getBody(req);
+        const { name, arguments: args } = body;
+
+        // Per-tool rate limiting for expensive ops
+        const toolRateResult = rateLimiter.checkLimit(clientId, name);
+        if (!toolRateResult.allowed) {
+          res.writeHead(429);
+          res.end(JSON.stringify({
+            error: `Rate limit exceeded for tool '${name}'`,
+            code: McpErrorCode.RATE_LIMITED,
+            retryAfterMs: toolRateResult.retryAfterMs
+          }));
+          return;
+        }
+
+        // Input validation against tool schema
+        const tool = registry.get(name);
+        if (tool) {
+          const validation = validateInput(args || {}, tool.inputSchema);
+          if (!validation.valid) {
+            res.writeHead(400);
+            res.end(JSON.stringify({
+              error: `Validation error: ${validation.errors.join('; ')}`,
+              code: McpErrorCode.VALIDATION_ERROR
+            }));
+            return;
+          }
+        }
+
+        const result = await registry.callTool(name, args || {}, {
+          clientId,
+          grantedPermissions: Object.values(McpPermission),
+        });
+        res.writeHead(200);
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      // ── Legacy endpoints (backward compatibility) ───────────────────────
+      // These remain so existing bridge versions continue working.
+
       if (req.method === 'GET' && url.pathname === '/status') {
         const store = EpisodeStore.get();
         const authManager = getAuthManager();
-        // Fix 3: Never expose raw tokens. Return auth state only.
         const isAuthenticated = authManager ? !!(await authManager.getIdToken()) : false;
 
         res.writeHead(200);
@@ -226,9 +423,24 @@ export function startMcpServer() {
 }
 
 export function stopMcpServer() {
+  // Stop token rotation
+  tokenManager.stop();
+
   if (server) {
     server.close();
     server = null;
+  }
+
+  // Clean up rate limiter state
+  rateLimiter.resetAll();
+
+  try {
+    const secretPath = path.join(__dirname, '..', '.mcp-secret.json');
+    if (fs.existsSync(secretPath)) {
+      fs.unlinkSync(secretPath);
+    }
+  } catch (err: any) {
+    console.error('[ContextLens] Failed to delete MCP secret file:', err);
   }
 }
 

@@ -1,0 +1,20 @@
+{
+  "name": "@contextlens/cli",
+  "version": "1.0.0",
+  "description": "Command line interface for ContextLens MCP platform",
+  "main": "dist/index.js",
+  "bin": {
+    "contextlens": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build"
+  },
+  "author": "Aman Sharma <Shasarita23@gmail.com>",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^18.0.0"
+  }
+}

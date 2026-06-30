@@ -1,0 +1,9 @@
+{
+  "name": "@contextlens/mcp",
+  "version": "1.0.0",
+  "description": "Model Context Protocol bridge for ContextLens",
+  "main": "index.js",
+  "author": "Aman Sharma <Shasarita23@gmail.com>",
+  "license": "MIT",
+  "dependencies": {}
+}
