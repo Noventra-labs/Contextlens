@@ -83,7 +83,9 @@ async function handleMessage(line) {
       sendResultResponse(id, {
         protocolVersion: '2024-11-05',
         capabilities: {
-          tools: {}
+          tools: {},
+          resources: {},
+          prompts: {},
         },
         serverInfo: {
           name: 'contextlens-mcp-bridge',
@@ -107,8 +109,99 @@ async function handleMessage(line) {
       await handleToolCall(id, params);
       break;
 
+    case 'resources/list':
+      await handleResourcesList(id);
+      break;
+
+    case 'resources/read':
+      await handleResourcesRead(id, params);
+      break;
+
+    case 'prompts/list':
+      await handlePromptsList(id);
+      break;
+
+    case 'prompts/get':
+      await handlePromptsGet(id, params);
+      break;
+
     default:
       sendErrorResponse(id, -32601, `Method not found: ${method}`);
+  }
+}
+
+/**
+ * Handle resources/list — fetch from extension.
+ */
+async function handleResourcesList(id) {
+  try {
+    const res = await extensionRequest('/mcp/resources/list', 'POST');
+    sendResultResponse(id, { resources: res.resources || [] });
+  } catch (err) {
+    if (err.code === 'ECONNREFUSED') {
+      sendToolError(id, 'ContextLens VS Code Extension is not running.');
+    } else {
+      sendErrorResponse(id, -32603, err.message);
+    }
+  }
+}
+
+/**
+ * Handle resources/read — fetch a specific resource.
+ */
+async function handleResourcesRead(id, params) {
+  try {
+    const res = await extensionRequest('/mcp/resources/read', 'POST', { uri: params.uri });
+    if (res.error) {
+      sendErrorResponse(id, -32602, res.error);
+    } else {
+      sendResultResponse(id, { contents: res.contents || [] });
+    }
+  } catch (err) {
+    if (err.code === 'ECONNREFUSED') {
+      sendToolError(id, 'ContextLens VS Code Extension is not running.');
+    } else {
+      sendErrorResponse(id, -32603, err.message);
+    }
+  }
+}
+
+/**
+ * Handle prompts/list — fetch from extension.
+ */
+async function handlePromptsList(id) {
+  try {
+    const res = await extensionRequest('/mcp/prompts/list', 'POST');
+    sendResultResponse(id, { prompts: res.prompts || [] });
+  } catch (err) {
+    if (err.code === 'ECONNREFUSED') {
+      sendToolError(id, 'ContextLens VS Code Extension is not running.');
+    } else {
+      sendErrorResponse(id, -32603, err.message);
+    }
+  }
+}
+
+/**
+ * Handle prompts/get — fetch a specific prompt.
+ */
+async function handlePromptsGet(id, params) {
+  try {
+    const res = await extensionRequest('/mcp/prompts/get', 'POST', {
+      name: params.name,
+      arguments: params.arguments || {}
+    });
+    if (res.error) {
+      sendErrorResponse(id, -32602, res.error);
+    } else {
+      sendResultResponse(id, { description: res.description, messages: res.messages || [] });
+    }
+  } catch (err) {
+    if (err.code === 'ECONNREFUSED') {
+      sendToolError(id, 'ContextLens VS Code Extension is not running.');
+    } else {
+      sendErrorResponse(id, -32603, err.message);
+    }
   }
 }
 

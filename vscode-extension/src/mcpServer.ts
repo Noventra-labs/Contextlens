@@ -12,6 +12,10 @@ import { TokenManager } from './mcp/auth/tokenManager';
 import { ClientIdentityTracker } from './mcp/auth/clientIdentity';
 import { RateLimiter } from './mcp/security/rateLimiter';
 import { validateInput, McpErrorCode } from './mcp/security/validator';
+import { listResources, readResource } from './mcp/resources/index';
+import { listPrompts, getPrompt } from './mcp/prompts/index';
+import { NotificationManager, McpNotificationType } from './mcp/notifications/notificationManager';
+import { SessionManager } from './mcp/session/sessionManager';
 
 // Import all tools — side-effect registers them into the registry
 import './mcp/tools/index';
@@ -102,12 +106,82 @@ export function startMcpServer() {
     const url = new URL(req.url || '', `http://${req.headers.host}`);
 
     try {
-      // ── Registry-powered tool dispatch ──────────────────────────────────
+      // ── Registry-powered tool dispatch ──────────────────────────────────────────
 
       if (req.method === 'POST' && url.pathname === '/mcp/tools/list') {
         const tools = registry.listTools();
         res.writeHead(200);
         res.end(JSON.stringify({ tools }));
+        return;
+      }
+
+      // ── Resources ──────────────────────────────────────────────────────────
+
+      if (req.method === 'POST' && url.pathname === '/mcp/resources/list') {
+        const resources = listResources();
+        res.writeHead(200);
+        res.end(JSON.stringify({ resources }));
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/mcp/resources/read') {
+        const body = await getBody(req);
+        const result = await readResource(body.uri);
+        if (!result) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: `Resource not found: ${body.uri}` }));
+          return;
+        }
+        res.writeHead(200);
+        res.end(JSON.stringify({ contents: [result] }));
+        return;
+      }
+
+      // ── Prompts ────────────────────────────────────────────────────────────
+
+      if (req.method === 'POST' && url.pathname === '/mcp/prompts/list') {
+        const prompts = listPrompts();
+        res.writeHead(200);
+        res.end(JSON.stringify({ prompts }));
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/mcp/prompts/get') {
+        const body = await getBody(req);
+        const messages = getPrompt(body.name, body.arguments || {});
+        if (!messages) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: `Prompt not found: ${body.name}` }));
+          return;
+        }
+        res.writeHead(200);
+        res.end(JSON.stringify({ description: body.name, messages }));
+        return;
+      }
+
+      // ── Notifications ───────────────────────────────────────────────────────
+
+      if (req.method === 'POST' && url.pathname === '/mcp/notifications/recent') {
+        const body = await getBody(req);
+        const notifMgr = NotificationManager.getInstance();
+        const notifications = notifMgr.getRecent(body.since, body.limit);
+        res.writeHead(200);
+        res.end(JSON.stringify({ notifications }));
+        return;
+      }
+
+      // ── Session ────────────────────────────────────────────────────────────
+
+      if (req.method === 'GET' && url.pathname === '/mcp/session') {
+        const store = EpisodeStore.get();
+        const sessionMgr = SessionManager.getInstance();
+        const state = sessionMgr.getState(
+          null, // workspace
+          store.getProjectId(),
+          store.getActiveEpisode()?.id
+        );
+        res.writeHead(200);
+        res.end(JSON.stringify(state));
         return;
       }
 
