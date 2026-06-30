@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MCP Explorer — ContextLens</title>
+  <meta name="description" content="Browse every ContextLens MCP tool, resource, and prompt with input/output schemas and example payloads." />
+  
+  <!-- OpenGraph / Facebook -->
+  <meta property="og:title" content="MCP Explorer — ContextLens" />
+  <meta property="og:description" content="Browse every ContextLens MCP tool, resource, and prompt with input/output schemas and example payloads." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://contextlens.dev/mcp.html" />
+  <meta property="og:image" content="https://contextlens.dev/og-image.png" />
+  
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="MCP Explorer — ContextLens" />
+  <meta name="twitter:description" content="Browse every ContextLens MCP tool, resource, and prompt with input/output schemas and example payloads." />
+  <meta name="twitter:image" content="https://contextlens.dev/og-image.png" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="bg-grid"></div>
+
+  <header class="nav">
+    <a href="./index.html" class="brand" aria-label="ContextLens home">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="2.5" y="2.5" width="19" height="19" rx="5" stroke="currentColor" stroke-width="1.5"/>
+        <circle cx="12" cy="12" r="3.2" fill="currentColor"/>
+        <circle cx="12" cy="12" r="6.5" stroke="currentColor" stroke-width="1" opacity=".5"/>
+      </svg>
+      <span>ContextLens</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="./index.html#features">Features</a>
+      <a href="./index.html#architecture">Architecture</a>
+      <a href="./mcp.html" aria-current="page">MCP</a>
+      <a href="./docs.html">Docs</a>
+      <a href="https://github.com/Noventra-labs/Contextlens" target="_blank" rel="noopener">GitHub ↗</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn btn--ghost" href="./docs.html">Docs</a>
+      <a class="btn btn--primary" href="https://marketplace.visualstudio.com/items?itemName=Noventra-Labs.contextlens" target="_blank" rel="noopener">Install</a>
+    </div>
+    <button class="nav__toggle" aria-label="Toggle navigation" aria-expanded="false">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="3" y1="12" x2="21" y2="12"></line>
+        <line x1="3" y1="6" x2="21" y2="6"></line>
+        <line x1="3" y1="18" x2="21" y2="18"></line>
+      </svg>
+    </button>
+  </header>
+
+  <main class="mcp">
+    <header class="mcp__head">
+      <p class="eyebrow">MCP · v1.0</p>
+      <h1 class="display">MCP Explorer</h1>
+      <p class="lede">Every primitive the ContextLens platform exposes to AI clients. Searchable, filterable, versioned.</p>
+
+      <div class="mcp__stats">
+        <span><strong>9</strong> tools</span>
+        <span><strong>5</strong> resources</span>
+        <span><strong>5</strong> prompts</span>
+        <span><strong>1.0</strong> protocol version</span>
+      </div>
+    </header>
+
+    <div class="mcp__filterbar">
+      <input id="mcp-search" class="input" placeholder="Filter tools, resources, prompts…" />
+      <div class="chips" role="tablist">
+        <button class="chip is-active" data-tab="tools">Tools</button>
+        <button class="chip" data-tab="resources">Resources</button>
+        <button class="chip" data-tab="prompts">Prompts</button>
+      </div>
+    </div>
+
+    <!-- TOOLS -->
+    <section class="mcp__group" data-group="tools">
+      <table class="mcp-table" id="mcp-tools">
+        <thead>
+          <tr><th>Name</th><th>Category</th><th>Version</th><th>Description</th><th></th></tr>
+        </thead>
+        <tbody>
+          <tr data-search="status health check bridge">
+            <td><code>get_status</code></td><td>Bridge</td><td>1.0</td><td>Bridge health, uptime, and tool/resource counts.</td>
+            <td><button class="link" data-detail="get_status">View →</button></td>
+          </tr>
+          <tr data-search="start begin episode open">
+            <td><code>start_episode</code></td><td>Episodes</td><td>1.0</td><td>Open a new episode and bind it to the current workspace.</td>
+            <td><button class="link" data-detail="start_episode">View →</button></td>
+          </tr>
+          <tr data-search="close end episode finish">
+            <td><code>close_episode</code></td><td>Episodes</td><td>1.0</td><td>Close the active episode with an optional summary.</td>
+            <td><button class="link" data-detail="close_episode">View →</button></td>
+          </tr>
+          <tr data-search="log record ai call prompt response">
+            <td><code>log_ai_call</code></td><td>Episodes</td><td>1.0</td><td>Record a prompt/response pair inside the active episode.</td>
+            <td><button class="link" data-detail="log_ai_call">View →</button></td>
+          </tr>
+          <tr data-search="explain diff git change">
+            <td><code>explain_diff</code></td><td>Search</td><td>1.0</td><td>Summarize a git diff in plain English with file-level impact.</td>
+            <td><button class="link" data-detail="explain_diff">View →</button></td>
+          </tr>
+          <tr data-search="search semantic query embedding">
+            <td><code>search_context</code></td><td>Search</td><td>1.0</td><td>Semantic search across episodes, diffs, and AI calls.</td>
+            <td><button class="link" data-detail="search_context">View →</button></td>
+          </tr>
+          <tr data-search="episode details get fetch">
+            <td><code>get_episode_details</code></td><td>Episodes</td><td>1.0</td><td>Full payload for a single episode by id.</td>
+            <td><button class="link" data-detail="get_episode_details">View →</button></td>
+          </tr>
+          <tr data-search="recent episodes list timeline">
+            <td><code>get_recent_episodes</code></td><td>Episodes</td><td>1.0</td><td>List recent episodes for the current workspace.</td>
+            <td><button class="link" data-detail="get_recent_episodes">View →</button></td>
+          </tr>
+          <tr data-search="past changes explain history audit">
+            <td><code>explain_past_changes</code></td><td>Search</td><td>1.0</td><td>Natural-language audit of historical changes to a path.</td>
+            <td><button class="link" data-detail="explain_past_changes">View →</button></td>
+          </tr>
+          <tr class="mcp-table__no-results" hidden>
+            <td colspan="5">No matching primitives found.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- RESOURCES -->
+    <section class="mcp__group" data-group="resources" hidden>
+      <table class="mcp-table" id="mcp-resources">
+        <thead><tr><th>URI</th><th>Kind</th><th>Version</th><th>Description</th><th></th></tr></thead>
+        <tbody>
+          <tr data-search="workspace current state status">
+            <td><code>workspace://current</code></td><td>Workspace</td><td>1.0</td><td>Current workspace metadata + active episode.</td>
+            <td><button class="link" data-detail="res_workspace_current">View →</button></td>
+          </tr>
+          <tr data-search="git diff changes staged unstaged">
+            <td><code>workspace://git-diff</code></td><td>Git</td><td>1.0</td><td>Staged + unstaged diff for the current branch.</td>
+            <td><button class="link" data-detail="res_git_diff">View →</button></td>
+          </tr>
+          <tr data-search="episodes list timeline">
+            <td><code>workspace://episodes</code></td><td>Episodes</td><td>1.0</td><td>Recent episodes with summaries and timestamps.</td>
+            <td><button class="link" data-detail="res_episodes">View →</button></td>
+          </tr>
+          <tr data-search="diagnostics problems errors lint">
+            <td><code>workspace://diagnostics</code></td><td>Diagnostics</td><td>1.0</td><td>Active editor problems (errors + warnings).</td>
+            <td><button class="link" data-detail="res_diagnostics">View →</button></td>
+          </tr>
+          <tr data-search="symbols outline functions classes">
+            <td><code>workspace://symbols</code></td><td>Workspace</td><td>1.0</td><td>Indexed symbols across the active project.</td>
+            <td><button class="link" data-detail="res_symbols">View →</button></td>
+          </tr>
+          <tr class="mcp-table__no-results" hidden>
+            <td colspan="5">No matching primitives found.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- PROMPTS -->
+    <section class="mcp__group" data-group="prompts" hidden>
+      <table class="mcp-table" id="mcp-prompts">
+        <thead><tr><th>Name</th><th>Category</th><th>Version</th><th>Description</th><th></th></tr></thead>
+        <tbody>
+          <tr data-search="explain diff change">
+            <td><code>explain_diff</code></td><td>Review</td><td>1.0</td><td>Plain-English summary of the current diff.</td>
+            <td><button class="link" data-detail="prompt_explain_diff">View →</button></td>
+          </tr>
+          <tr data-search="review code quality">
+            <td><code>review_code</code></td><td>Review</td><td>1.0</td><td>Structured code review against the active episode.</td>
+            <td><button class="link" data-detail="prompt_review_code">View →</button></td>
+          </tr>
+          <tr data-search="generate tests">
+            <td><code>generate_tests</code></td><td>Test</td><td>1.0</td><td>Generate unit/integration tests for a given path.</td>
+            <td><button class="link" data-detail="prompt_generate_tests">View →</button></td>
+          </tr>
+          <tr data-search="security audit">
+            <td><code>security_audit</code></td><td>Security</td><td>1.0</td><td>Threat-model + concrete findings for a file or PR.</td>
+            <td><button class="link" data-detail="prompt_security_audit">View →</button></td>
+          </tr>
+          <tr data-search="summarize episode">
+            <td><code>summarize_episode</code></td><td>Episodes</td><td>1.0</td><td>Concise recap of an episode for handoff or PR.</td>
+            <td><button class="link" data-detail="prompt_summarize_episode">View →</button></td>
+          </tr>
+          <tr class="mcp-table__no-results" hidden>
+            <td colspan="5">No matching primitives found.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- DETAIL PANEL -->
+    <section class="mcp__detail" id="mcp-detail" hidden>
+      <button class="mcp__close" id="mcp-close" aria-label="Close">×</button>
+      <h3 id="mcp-detail-name"></h3>
+      <div class="mcp__detail-grid">
+        <div>
+          <h5>Purpose</h5>
+          <p id="mcp-detail-purpose"></p>
+          <h5>Permissions</h5>
+          <p><span class="pill pill--ok" id="mcp-detail-perm">workspace:read</span></p>
+          <h5>Version</h5>
+          <p id="mcp-detail-version">1.0</p>
+        </div>
+        <div>
+          <h5>Input schema</h5>
+          <pre><code id="mcp-detail-input"></code></pre>
+          <h5>Output schema</h5>
+          <pre><code id="mcp-detail-output"></code></pre>
+        </div>
+      </div>
+      <div class="mcp__detail-examples">
+        <div>
+          <h5>Example request</h5>
+          <pre><code id="mcp-detail-req"></code></pre>
+        </div>
+        <div>
+          <h5>Example response</h5>
+          <pre><code id="mcp-detail-res"></code></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="foot__cols">
+      <div>
+        <h5>Product</h5>
+        <a href="./index.html#features">Features</a>
+        <a href="./index.html#architecture">Architecture</a>
+        <a href="./mcp.html">MCP Tools</a>
+        <a href="./docs.html">Docs</a>
+      </div>
+      <div>
+        <h5>Resources</h5>
+        <a href="https://github.com/Noventra-labs/Contextlens" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/Noventra-labs/Contextlens/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a>
+        <a href="https://github.com/Noventra-labs/Contextlens/blob/main/ROADMAP.md" target="_blank" rel="noopener">Roadmap</a>
+        <a href="https://github.com/Noventra-labs/Contextlens/tree/main/examples" target="_blank" rel="noopener">Examples</a>
+      </div>
+      <div>
+        <h5>Community</h5>
+        <a href="https://github.com/Noventra-labs/Contextlens/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a>
+        <a href="https://github.com/Noventra-labs/Contextlens/blob/main/CODE_OF_CONDUCT.md" target="_blank" rel="noopener">Code of Conduct</a>
+        <a href="./docs.html#security">Security</a>
+        <a href="https://github.com/Noventra-labs/Contextlens/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+      </div>
+      <div>
+        <h5>ContextLens</h5>
+        <p class="muted foot__tag">An engineering tool built by engineers.</p>
+        <p class="muted small">© 2026 Noventra Labs · MIT License · <a href="./privacy.html">Privacy Policy</a></p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>
