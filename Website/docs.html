@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Documentation — ContextLens</title>
+  <meta name="description" content="Documentation for ContextLens: install, configure, integrate with MCP clients, and extend the platform." />
+  
+  <!-- OpenGraph / Facebook -->
+  <meta property="og:title" content="Documentation — ContextLens" />
+  <meta property="og:description" content="Documentation for ContextLens: install, configure, integrate with MCP clients, and extend the platform." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://contextlens.dev/docs.html" />
+  <meta property="og:image" content="https://contextlens.dev/og-image.png" />
+  
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Documentation — ContextLens" />
+  <meta name="twitter:description" content="Documentation for ContextLens: install, configure, integrate with MCP clients, and extend the platform." />
+  <meta name="twitter:image" content="https://contextlens.dev/og-image.png" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="bg-grid"></div>
+
+  <header class="nav">
+    <a href="./index.html" class="brand" aria-label="ContextLens home">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="2.5" y="2.5" width="19" height="19" rx="5" stroke="currentColor" stroke-width="1.5"/>
+        <circle cx="12" cy="12" r="3.2" fill="currentColor"/>
+        <circle cx="12" cy="12" r="6.5" stroke="currentColor" stroke-width="1" opacity=".5"/>
+      </svg>
+      <span>ContextLens</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="./index.html#features">Features</a>
+      <a href="./index.html#architecture">Architecture</a>
+      <a href="./mcp.html">MCP</a>
+      <a href="./docs.html" aria-current="page">Docs</a>
+      <a href="https://github.com/Noventra-labs/Contextlens" target="_blank" rel="noopener">GitHub ↗</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn btn--ghost" href="./index.html">Home</a>
+      <a class="btn btn--primary" href="https://marketplace.visualstudio.com/items?itemName=Noventra-Labs.contextlens" target="_blank" rel="noopener">Install</a>
+    </div>
+    <button class="nav__toggle" aria-label="Toggle navigation" aria-expanded="false">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="3" y1="12" x2="21" y2="12"></line>
+        <line x1="3" y1="6" x2="21" y2="6"></line>
+        <line x1="3" y1="18" x2="21" y2="18"></line>
+      </svg>
+    </button>
+  </header>
+
+  <div class="docs">
+    <aside class="docs__sidebar" aria-label="Documentation">
+      <div class="docs__version" style="padding: 0 10px 14px; display: flex; align-items: center; justify-content: space-between;">
+        <span style="font-size: 11px; font-family: var(--mono); color: var(--fg-mute); text-transform: uppercase; letter-spacing: 0.05em;">Version</span>
+        <select class="input" style="width: auto; padding: 4px 8px; font-size: 11px; font-family: var(--mono); border-radius: 6px; height: 26px; min-width: 80px; background: var(--surface);">
+          <option value="v1.0" selected>v1.0 (latest)</option>
+          <option value="v0.9" disabled>v0.9 (legacy)</option>
+        </select>
+      </div>
+      <div class="docs__search" style="padding: 0 10px 20px;">
+        <input id="docs-search" class="input" placeholder="Search docs…" style="width: 100%;" />
+      </div>
+      <div class="docs__group">
+        <h6>Get started</h6>
+        <a href="#intro">Introduction</a>
+        <a href="#install">Installation</a>
+        <a href="#firebase-setup">Firebase setup</a>
+        <a href="#quickstart">Quick start</a>
+        <a href="#clients">Supported clients</a>
+      </div>
+      <div class="docs__group">
+        <h6>Concepts</h6>
+        <a href="#episodes">Episodes</a>
+        <a href="#watchers">Watchers</a>
+        <a href="#sync">Sync engine</a>
+      </div>
+      <div class="docs__group">
+        <h6>MCP Reference</h6>
+        <a href="#mcp-tools">Tools</a>
+        <a href="#mcp-resources">Resources</a>
+        <a href="#mcp-prompts">Prompts</a>
+      </div>
+      <div class="docs__group">
+        <h6>CLI</h6>
+        <a href="#cli-install">Install CLI</a>
+        <a href="#cli-commands">Commands</a>
+      </div>
+      <div class="docs__group">
+        <h6>Operations</h6>
+        <a href="#security">Security</a>
+        <a href="#troubleshoot">Troubleshooting</a>
+      </div>
+    </aside>
+
+    <article class="docs__body">
+      <div class="docs__toc" aria-label="On this page">
+        <h6>On this page</h6>
+        <a href="#intro">Introduction</a>
+        <a href="#install">Installation</a>
+        <a href="#firebase-setup">Firebase setup</a>
+        <a href="#quickstart">Quick start</a>
+        <a href="#clients">Supported clients</a>
+        <a href="#episodes">Episodes</a>
+        <a href="#watchers">Watchers</a>
+        <a href="#sync">Sync engine</a>
+        <a href="#mcp-tools">MCP Tools</a>
+        <a href="#mcp-resources">MCP Resources</a>
+        <a href="#mcp-prompts">MCP Prompts</a>
+        <a href="#cli-install">CLI install</a>
+        <a href="#cli-commands">CLI commands</a>
+        <a href="#security">Security</a>
+        <a href="#troubleshoot">Troubleshooting</a>
+      </div>
+
+      <div class="docs__content">
+        <header class="docs__head">
+          <p class="eyebrow">Documentation · v1.0</p>
+          <h1 class="display">ContextLens Docs</h1>
+          <p class="lede">Everything you need to install, configure, and extend ContextLens.</p>
+        </header>
+
+        <section id="intro">
+          <h2>Introduction</h2>
+          <p>
+            ContextLens is an AI context layer for your codebase. It captures the <em>why</em> behind every change —
+            diffs, AI interactions, decisions — and exposes them to any MCP-compatible AI client.
+          </p>
+          <p>
+            Without ContextLens, every AI session starts cold: the model re-reads files, re-derives intent, repeats work.
+            With ContextLens, your AI client can <code>search_context</code>, <code>explain_diff</code>, and
+            <code>summarize_episode</code> against a structured, persistent store of your development history.
+          </p>
+        </section>
+
+        <section id="install">
+          <h2>Installation</h2>
+          <h3>VS Code Extension</h3>
+          <p>Install from the VS Code Marketplace:</p>
+          <pre><code><span class="t-prompt">$</span> code --install-extension Noventra-Labs.contextlens
+<span class="t-muted"># or search "ContextLens" in the Extensions panel</span></code></pre>
+
+          <h3>MCP Bridge (npm)</h3>
+          <pre><code><span class="t-prompt">$</span> npm install -g @contextlens/cli
+<span class="t-prompt">$</span> npx @contextlens/cli --version
+1.0.0</code></pre>
+
+          <h3>Requirements</h3>
+          <ul>
+            <li>VS Code 1.85+ <em>or</em> Node.js 18+ (for CLI-only mode)</li>
+            <li>Loopback port <code>3012</code> available</li>
+            <li>For cloud sync: a Firebase project + Gemini API key</li>
+          </ul>
+        </section>
+
+        <section id="firebase-setup">
+          <h2>Firebase &amp; Gemini Setup</h2>
+          <p>ContextLens uses Firebase for cloud synchronization and Gemini/Vertex AI for semantic embeddings and intent summaries.</p>
+          
+          <h3>1. Configure Firebase Cloud</h3>
+          <p>Follow these steps to initialize your Firebase project:</p>
+          <ol>
+            <li>Go to the <a href="https://console.firebase.google.com/" target="_blank" rel="noopener" class="link">Firebase Console</a> and create a new project.</li>
+            <li>Enable <strong>Firestore Database</strong> in your project.</li>
+            <li>Enable <strong>Firebase Authentication</strong> and activate the <em>Anonymous</em> or <em>Email/Password</em> provider.</li>
+            <li>Retrieve your project credentials from the Project Settings and add them to your <code>.contextlens.json</code> configuration file.</li>
+          </ol>
+
+          <h3>2. Store Gemini API Key</h3>
+          <p>Embeddings and semantic search require a Gemini API key. Setup options:</p>
+          <ul>
+            <li><strong>VS Code:</strong> Run the command <code>ContextLens: Store Gemini API Key</code> from the Command Palette and paste your key. This caches it securely in your OS Keychain using VS Code Secret Storage.</li>
+            <li><strong>CLI Environment:</strong> Export the environment variable in your terminal:
+              <pre><code>export GEMINI_API_KEY="your-api-key-here"</code></pre>
+            </li>
+          </ul>
+        </section>
+
+        <section id="quickstart">
+          <h2>Quick start</h2>
+          <ol class="steps">
+            <li>Install the VS Code extension.</li>
+            <li>Open a workspace. Watch the status bar for the active episode indicator.</li>
+            <li>Run <code>ContextLens: Auto-Setup MCP in AI Clients</code> from the Command Palette.
+              <div class="cmd-palette-mockup">
+                <div class="cmd-palette-mockup__input">
+                  <span>&gt;</span>
+                  <span>ContextLens: Auto</span>
+                </div>
+                <div class="cmd-palette-mockup__item active">
+                  <span>ContextLens: Auto-Setup MCP in AI Clients</span>
+                  <span class="cmd-palette-mockup__desc">Configure Claude, Cursor, Gemini automatically</span>
+                </div>
+                <div class="cmd-palette-mockup__item">
+                  <span>ContextLens: Start Episode</span>
+                  <span class="cmd-palette-mockup__desc">Open a new context tracking episode</span>
+                </div>
+              </div>
+            </li>
+            <li>Open Claude Desktop, Cursor, or your preferred MCP client.</li>
+            <li>Ask: <em>"Explain the changes in the latest episode"</em> — ContextLens answers with real context.</li>
+          </ol>
+        </section>
+
+        <section id="clients">
+          <h2>Supported MCP clients</h2>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Client</th><th>Status</th><th>Setup</th></tr></thead>
+              <tbody>
+                <tr><td>Claude Desktop</td><td><span class="pill pill--ok">Supported</span></td><td>Auto / Manual</td></tr>
+                <tr><td>Cursor</td><td><span class="pill pill--ok">Supported</span></td><td>Auto / Manual</td></tr>
+                <tr><td>Antigravity IDE</td><td><span class="pill pill--ok">Supported</span></td><td>Manual config</td></tr>
+                <tr><td>VS Code Agent</td><td><span class="pill pill--built">Built-in</span></td><td>Automatic</td></tr>
+                <tr><td>Gemini CLI</td><td><span class="pill pill--ok">Supported</span></td><td>Manual config</td></tr>
+                <tr><td>OpenAI Agents SDK</td><td><span class="pill pill--ok">Supported</span></td><td>Python integration</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="episodes">
+          <h2>Episodes</h2>
+          <p>An <strong>episode</strong> is a logical unit of work — a feature, bugfix, or refactor — bounded by explicit start and close calls. Every artifact produced inside an episode (file edits, git commits, AI calls, terminal commands, TODOs) is associated with it.</p>
+          <pre><code><span class="t-c">// Initialize connection to ContextLens local MCP bridge</span>
+<span class="t-k">const</span> mcp = <span class="t-k">new</span> <span class="t-fn">MCPClient</span>({ transport: <span class="t-s">"stdio"</span> });
+
+<span class="t-c">// Start</span>
+<span class="t-k">await</span> mcp.<span class="t-fn">call</span>(<span class="t-s">"start_episode"</span>, { title: <span class="t-s">"Ship OAuth"</span> });
+
+<span class="t-c">// ... do work ...</span>
+
+<span class="t-c">// Close</span>
+<span class="t-k">await</span> mcp.<span class="t-fn">call</span>(<span class="t-s">"close_episode"</span>, { summary: <span class="t-s">"Adds Google + GitHub providers"</span> });</code></pre>
+        </section>
+
+        <section id="watchers">
+          <h2>Watchers</h2>
+          <p>Autonomous watchers hook into the editor lifecycle and capture context without explicit user action:</p>
+          <ul>
+            <li><strong>File watcher</strong> — diffs on save, scoped to the active episode.</li>
+            <li><strong>Selection watcher</strong> — captures active text selections for downstream summarization.</li>
+            <li><strong>Terminal watcher</strong> — records command + output, classified by exit status.</li>
+            <li><strong>TODO watcher</strong> — scans for <code>TODO</code>/<code>FIXME</code>/<code>Issue #…</code> markers.</li>
+          </ul>
+          <p>Watchers are configured in your global or workspace-specific <code>.contextlens.json</code> configuration file:</p>
+          <pre><code><span class="t-c">// .contextlens.json</span>
+{
+  <span class="t-s">"watchers"</span>: {
+    <span class="t-s">"file"</span>: <span class="t-k">true</span>,
+    <span class="t-s">"selection"</span>: <span class="t-k">true</span>,
+    <span class="t-s">"terminal"</span>: <span class="t-k">false</span>,
+    <span class="t-s">"todo"</span>: <span class="t-k">true</span>
+  }
+}</code></pre>
+        </section>
+
+        <section id="sync">
+          <h2>Sync engine</h2>
+          <p>The sync engine pushes cached local episodes to Firestore, handling auth headers, conflict resolution, and offline modes. Sync is opt-in: if you disable it, ContextLens stays fully local.</p>
+          <pre><code><span class="t-c">// .contextlens.json</span>
+{
+  <span class="t-s">"sync"</span>: {
+    <span class="t-s">"enabled"</span>: <span class="t-k">true</span>,
+    <span class="t-s">"projectId"</span>: <span class="t-s">"your-firebase-project"</span>,
+    <span class="t-s">"interval"</span>: <span class="t-s">"5m"</span>
+  }
+}</code></pre>
+          <p><strong>Offline &amp; Merge Strategy:</strong> When offline, ContextLens writes files, diffs, and AI transactions directly to a local SQLite store. When the network is re-established, the sync engine automatically performs a batch synchronization. Conflict resolution uses a <strong>last-write-wins (timestamp-based)</strong> strategy at the individual transaction level, ensuring your cloud dashboard stays updated without dropping local contributions.</p>
+        </section>
+
+        <section id="cli-install">
+          <h2>CLI install</h2>
+          <pre><code><span class="t-prompt">$</span> npm install -g @contextlens/cli
+<span class="t-prompt">$</span> contextlens --help</code></pre>
+        </section>
+
+        <section id="cli-commands">
+          <h2>Commands</h2>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Command</th><th>Description</th></tr></thead>
+              <tbody>
+                <tr><td><code>contextlens start [title]</code></td><td>Begin a new episode</td></tr>
+                <tr><td><code>contextlens close</code></td><td>Close the active episode</td></tr>
+                <tr><td><code>contextlens search [query]</code></td><td>Semantic search</td></tr>
+                <tr><td><code>contextlens mcp doctor</code></td><td>Health &amp; config check</td></tr>
+                <tr><td><code>contextlens mcp logs</code></td><td>Tail structured logs</td></tr>
+                <tr><td><code>contextlens sync</code></td><td>Force a sync</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="security">
+          <h2>Security</h2>
+          <ul>
+            <li><strong>Rotating tokens</strong> — 30-minute TTL with a 1-minute grace window.</li>
+            <li><strong>Loopback binding</strong> — the bridge exposes <code>127.0.0.1</code> only.</li>
+            <li><strong>Token bucket</strong> — per-client rate limiting with burst protection.</li>
+            <li><strong>Schema validation</strong> — every tool call validated against an explicit JSON schema before execution.</li>
+            <li><strong>Secret storage</strong> — third-party API keys live in VS Code Secrets (OS keychain).</li>        <section id="troubleshoot">
+          <h2>Troubleshooting</h2>
+          <h3>MCP Bridge fails to start</h3>
+          <pre><code><span class="t-prompt">$</span> npx @contextlens/cli mcp doctor
+<span class="t-warn">✘</span> port 3012 in use — another MCP server is bound
+<span class="t-muted">fix:</span> stop the conflicting process or set <span class="t-mono">CONTEXTLENS_PORT=3013</span></code></pre>
+ 
+          <h3>AI client can't see tools</h3>
+          <ol>
+            <li>Confirm the bridge is healthy: <code>contextlens mcp doctor</code>.</li>
+            <li>Re-run <code>ContextLens: Auto-Setup MCP in AI Clients</code> from the VS Code palette.</li>
+            <li>Restart the AI client.</li>
+          </ol>
+        </section>
+
+        <section id="mcp-tools">
+          <h2>MCP Tools Reference</h2>
+          <p>ContextLens exposes 9 primary tools for AI clients to inspect and write developer context. Use the interactive <a href="./mcp.html" class="link">MCP Explorer</a> to view detailed JSON schemas and example requests.</p>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Tool Name</th><th>Parameters</th><th>Description</th></tr></thead>
+              <tbody>
+                <tr><td><code>get_status</code></td><td>None</td><td>Returns bridge health, version, uptime, and active primitives counts.</td></tr>
+                <tr><td><code>start_episode</code></td><td><code>title</code> (required)</td><td>Opens a new episode and binds it to the current workspace.</td></tr>
+                <tr><td><code>close_episode</code></td><td><code>summary</code> (optional)</td><td>Closes the active episode with an optional intent summary.</td></tr>
+                <tr><td><code>log_ai_call</code></td><td><code>prompt</code>, <code>response</code>, <code>model</code></td><td>Records prompt/response pairs inside the active episode.</td></tr>
+                <tr><td><code>explain_diff</code></td><td><code>ref</code> (default: HEAD)</td><td>Summarizes a git diff in plain English with file-level impact.</td></tr>
+                <tr><td><code>search_context</code></td><td><code>query</code> (required), <code>limit</code></td><td>Performs a semantic query across episodes, diffs, and AI logs.</td></tr>
+                <tr><td><code>get_episode_details</code></td><td><code>id</code> (required)</td><td>Returns full payload details for a single episode by ID.</td></tr>
+                <tr><td><code>get_recent_episodes</code></td><td><code>limit</code></td><td>Lists recent episodes in the active workspace.</td></tr>
+                <tr><td><code>explain_past_changes</code></td><td><code>path</code> (required)</td><td>Provides a natural-language audit of historical edits to a path.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="mcp-resources">
+          <h2>MCP Resources Reference</h2>
+          <p>Resources represent read-only context structures that AI clients can load directly as text documents.</p>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>URI Template</th><th>Kind</th><th>Description</th></tr></thead>
+              <tbody>
+                <tr><td><code>workspace://current</code></td><td>Workspace</td><td>Current workspace metadata, active episode ID, and tracking state.</td></tr>
+                <tr><td><code>workspace://git-diff</code></td><td>Git</td><td>The combined staged and unstaged diff for the current branch.</td></tr>
+                <tr><td><code>workspace://episodes</code></td><td>Episodes</td><td>List of recent episodes with timestamps and summaries.</td></tr>
+                <tr><td><code>workspace://diagnostics</code></td><td>Diagnostics</td><td>Active problems, errors, and warning markers in the workspace.</td></tr>
+                <tr><td><code>workspace://symbols</code></td><td>Workspace</td><td>Indexed symbols, functions, and classes across the codebase.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="mcp-prompts">
+          <h2>MCP Prompts Reference</h2>
+          <p>Prompts are reusable templates for guiding AIs through common software engineering flows.</p>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Prompt Name</th><th>Category</th><th>Description</th></tr></thead>
+              <tbody>
+                <tr><td><code>explain_diff</code></td><td>Review</td><td>Guides the AI to explain a git diff with focus on risk assessment.</td></tr>
+                <tr><td><code>review_code</code></td><td>Review</td><td>Generates a structured review against the intent of the active episode.</td></tr>
+                <tr><td><code>generate_tests</code></td><td>Test</td><td>Generates unit or integration tests for the current code path.</td></tr>
+                <tr><td><code>security_audit</code></td><td>Security</td><td>Performs threat-modeling and finds vulnerabilities in a given file.</td></tr>
+                <tr><td><code>summarize_episode</code></td><td>Episodes</td><td>Creates a concise recap of all work done inside the current episode.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <div class="docs__footer-links">
+          <a href="https://github.com/Noventra-labs/Contextlens/edit/main/Website/docs.html" target="_blank" rel="noopener" class="link">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 4px;"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            Edit this page on GitHub
+          </a>
+        </div>
+      </div>
+    </article>
+  </div>
+
+  <footer class="foot">
+    <div class="foot__cols">
+      <div>
+        <h5>Product</h5>
+        <a href="./index.html#features">Features</a>
+        <a href="./index.html#architecture">Architecture</a>
+        <a href="./mcp.html">MCP Tools</a>
+        <a href="./docs.html">Docs</a>
+      </div>
+      <div>
+        <h5>Resources</h5>
+        <a href="https://github.com/Noventra-labs/Contextlens" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/Noventra-labs/Contextlens/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a>
+        <a href="https://github.com/Noventra-labs/Contextlens/blob/main/ROADMAP.md" target="_blank" rel="noopener">Roadmap</a>
+        <a href="https://github.com/Noventra-labs/Contextlens/tree/main/examples" target="_blank" rel="noopener">Examples</a>
+      </div>
+      <div>
+        <h5>Community</h5>
+        <a href="https://github.com/Noventra-labs/Contextlens/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a>
+        <a href="https://github.com/Noventra-labs/Contextlens/blob/main/CODE_OF_CONDUCT.md" target="_blank" rel="noopener">Code of Conduct</a>
+        <a href="./docs.html#security">Security</a>
+        <a href="https://github.com/Noventra-labs/Contextlens/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+      </div>
+      <div>
+        <h5>ContextLens</h5>
+        <p class="muted foot__tag">An engineering tool built by engineers.</p>
+        <p class="muted small">© 2026 Noventra Labs · MIT License · <a href="./privacy.html">Privacy Policy</a></p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>
