@@ -19,6 +19,7 @@ const EXTENSION_HOST = '127.0.0.1';
 // Read MCP secret from environment (set by extension's auto-setup)
 // Or fall back to reading the secret file next to the bridge.
 let MCP_SECRET = process.env.CONTEXTLENS_MCP_SECRET || '';
+const MCP_CLIENT_ID = process.env.CONTEXTLENS_MCP_CLIENT || 'mcp-bridge';
 if (!MCP_SECRET) {
   try {
     const secretPath = path.join(__dirname, '.mcp-secret.json');
@@ -415,7 +416,25 @@ function getFallbackToolList() {
   ];
 }
 
-function extensionRequest(path, method, body) {
+/**
+ * Re-read the secret file (supports token rotation).
+ */
+function refreshSecret() {
+  try {
+    const secretPath = path.join(__dirname, '.mcp-secret.json');
+    if (fs.existsSync(secretPath)) {
+      const data = fs.readFileSync(secretPath, 'utf8');
+      const parsed = JSON.parse(data);
+      if (parsed && parsed.secret) {
+        MCP_SECRET = parsed.secret;
+      }
+    }
+  } catch (err) {
+    // Silent fail
+  }
+}
+
+function extensionRequest(path, method, body, isRetry) {
   return new Promise((resolve, reject) => {
     const payload = body ? JSON.stringify(body) : '';
     const req = http.request({
@@ -427,11 +446,18 @@ function extensionRequest(path, method, body) {
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(payload),
         'X-MCP-Secret': MCP_SECRET,
+        'X-MCP-Client': MCP_CLIENT_ID,
       }
     }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
+        // Handle token rotation: 401 means secret rotated, re-read and retry once
+        if (res.statusCode === 401 && !isRetry) {
+          refreshSecret();
+          extensionRequest(path, method, body, true).then(resolve).catch(reject);
+          return;
+        }
         try {
           resolve(JSON.parse(data));
         } catch {

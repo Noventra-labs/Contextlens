@@ -8,6 +8,10 @@ import { GitContext } from './gitContext';
 import { createHash, randomBytes } from 'crypto';
 import { ToolRegistry } from './mcp/registry/ToolRegistry';
 import { McpPermission } from './mcp/permissions';
+import { TokenManager } from './mcp/auth/tokenManager';
+import { ClientIdentityTracker } from './mcp/auth/clientIdentity';
+import { RateLimiter } from './mcp/security/rateLimiter';
+import { validateInput, McpErrorCode } from './mcp/security/validator';
 
 // Import all tools — side-effect registers them into the registry
 import './mcp/tools/index';
@@ -15,27 +19,38 @@ import './mcp/tools/index';
 let server: http.Server | null = null;
 const PORT = 3012;
 
-// Per-session local secret for MCP auth.
-// Only the bridge process (which reads this secret) can make requests.
-let localSecret: string = '';
+// Security infrastructure
+const tokenManager = new TokenManager();
+const clientTracker = new ClientIdentityTracker();
+const rateLimiter = new RateLimiter();
 
 export function getMcpSecret(): string {
-  return localSecret;
+  return tokenManager.getToken() || '';
+}
+
+/**
+ * Write current token to secret file for bridge access.
+ */
+function writeSecretFile(token: string): void {
+  try {
+    const secretPath = path.join(__dirname, '..', '.mcp-secret.json');
+    fs.writeFileSync(secretPath, JSON.stringify({ secret: token }), 'utf8');
+  } catch (err: any) {
+    console.error('[ContextLens] Failed to save MCP secret file:', err);
+  }
 }
 
 export function startMcpServer() {
   if (server) return;
 
-  // Generate a random secret for this session
-  localSecret = randomBytes(32).toString('hex');
+  // Start rotating token manager
+  const initialToken = tokenManager.start();
+  writeSecretFile(initialToken);
 
-  // Save secret for local bridge access
-  try {
-    const secretPath = path.join(__dirname, '..', '.mcp-secret.json');
-    fs.writeFileSync(secretPath, JSON.stringify({ secret: localSecret }), 'utf8');
-  } catch (err: any) {
-    console.error('[ContextLens] Failed to save MCP secret file:', err);
-  }
+  // Update secret file on each rotation
+  tokenManager.onRotate((newToken) => {
+    writeSecretFile(newToken);
+  });
 
   const registry = ToolRegistry.getInstance();
 
@@ -46,7 +61,7 @@ export function startMcpServer() {
     // CORS headers for safety
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-MCP-Secret');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-MCP-Secret, X-MCP-Client');
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -54,11 +69,33 @@ export function startMcpServer() {
       return;
     }
 
-    // Validate local secret on every request
+    // Validate rotating token on every request
     const requestSecret = req.headers['x-mcp-secret'] as string;
-    if (!requestSecret || requestSecret !== localSecret) {
+    if (!tokenManager.validate(requestSecret)) {
       res.writeHead(401);
-      res.end(JSON.stringify({ error: 'Unauthorized — invalid or missing MCP secret' }));
+      res.end(JSON.stringify({
+        error: 'Unauthorized — invalid or missing MCP secret',
+        code: McpErrorCode.UNAUTHORIZED
+      }));
+      return;
+    }
+
+    // Track client identity
+    const { clientId, version } = clientTracker.parseFromHeaders(req.headers as Record<string, string | string[] | undefined>);
+    clientTracker.recordConnection(clientId, version);
+
+    // Rate limiting
+    const rateResult = rateLimiter.checkLimit(clientId);
+    res.setHeader('X-RateLimit-Remaining', String(rateResult.remaining));
+    res.setHeader('X-RateLimit-Limit', String(rateResult.limit));
+    if (!rateResult.allowed) {
+      res.writeHead(429);
+      res.setHeader('Retry-After', String(Math.ceil((rateResult.retryAfterMs || 1000) / 1000)));
+      res.end(JSON.stringify({
+        error: 'Rate limit exceeded',
+        code: McpErrorCode.RATE_LIMITED,
+        retryAfterMs: rateResult.retryAfterMs
+      }));
       return;
     }
 
@@ -77,8 +114,35 @@ export function startMcpServer() {
       if (req.method === 'POST' && url.pathname === '/mcp/tools/call') {
         const body = await getBody(req);
         const { name, arguments: args } = body;
+
+        // Per-tool rate limiting for expensive ops
+        const toolRateResult = rateLimiter.checkLimit(clientId, name);
+        if (!toolRateResult.allowed) {
+          res.writeHead(429);
+          res.end(JSON.stringify({
+            error: `Rate limit exceeded for tool '${name}'`,
+            code: McpErrorCode.RATE_LIMITED,
+            retryAfterMs: toolRateResult.retryAfterMs
+          }));
+          return;
+        }
+
+        // Input validation against tool schema
+        const tool = registry.get(name);
+        if (tool) {
+          const validation = validateInput(args || {}, tool.inputSchema);
+          if (!validation.valid) {
+            res.writeHead(400);
+            res.end(JSON.stringify({
+              error: `Validation error: ${validation.errors.join('; ')}`,
+              code: McpErrorCode.VALIDATION_ERROR
+            }));
+            return;
+          }
+        }
+
         const result = await registry.callTool(name, args || {}, {
-          clientId: req.headers['x-mcp-client'] as string,
+          clientId,
           grantedPermissions: Object.values(McpPermission),
         });
         res.writeHead(200);
@@ -266,10 +330,17 @@ export function startMcpServer() {
 }
 
 export function stopMcpServer() {
+  // Stop token rotation
+  tokenManager.stop();
+
   if (server) {
     server.close();
     server = null;
   }
+
+  // Clean up rate limiter state
+  rateLimiter.resetAll();
+
   try {
     const secretPath = path.join(__dirname, '..', '.mcp-secret.json');
     if (fs.existsSync(secretPath)) {
