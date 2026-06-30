@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Privacy Policy — ContextLens</title>
+  <meta name="description" content="Privacy Policy for ContextLens: offline-first context tracking and cloud sync." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="bg-grid"></div>
+
+  <header class="nav">
+    <a href="./index.html" class="brand" aria-label="ContextLens home">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="2.5" y="2.5" width="19" height="19" rx="5" stroke="currentColor" stroke-width="1.5"/>
+        <circle cx="12" cy="12" r="3.2" fill="currentColor"/>
+        <circle cx="12" cy="12" r="6.5" stroke="currentColor" stroke-width="1" opacity=".5"/>
+      </svg>
+      <span>ContextLens</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="./index.html#features">Features</a>
+      <a href="./index.html#architecture">Architecture</a>
+      <a href="./mcp.html">MCP</a>
+      <a href="./docs.html">Docs</a>
+      <a href="https://github.com/Noventra-labs/Contextlens" target="_blank" rel="noopener">GitHub ↗</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn btn--ghost" href="./docs.html">Docs</a>
+      <a class="btn btn--primary" href="https://marketplace.visualstudio.com/items?itemName=Noventra-Labs.contextlens" target="_blank" rel="noopener">Install</a>
+    </div>
+    <button class="nav__toggle" aria-label="Toggle navigation" aria-expanded="false">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="3" y1="12" x2="21" y2="12"></line>
+        <line x1="3" y1="6" x2="21" y2="6"></line>
+        <line x1="3" y1="18" x2="21" y2="18"></line>
+      </svg>
+    </button>
+  </header>
+
+  <main style="max-width: 800px; margin: 0 auto; padding: 80px 24px 100px;">
+    <header style="margin-bottom: 48px; border-bottom: 1px solid var(--border); padding-bottom: 24px;">
+      <p class="eyebrow">Privacy · v1.0</p>
+      <h1 class="display" style="font-size: clamp(32px, 5vw, 56px);">Privacy Policy</h1>
+      <p class="lede">How ContextLens handles your codebase data and secrets.</p>
+    </header>
+
+    <section style="margin-bottom: 32px;">
+      <h2 style="font-family: var(--display); font-size: 22px; color: var(--fg); margin-bottom: 12px;">1. Offline-First Architecture</h2>
+      <p style="color: var(--fg-dim); line-height: 1.7; margin-bottom: 16px;">
+        ContextLens is designed to be **offline-first**. All watchers, local history caches, git diff logs, and AI prompt/response details are saved entirely on your local machine in an SQLite database. No tracking data or code intent is transmitted to external servers by default.
+      </p>
+    </section>
+
+    <section style="margin-bottom: 32px;">
+      <h2 style="font-family: var(--display); font-size: 22px; color: var(--fg); margin-bottom: 12px;">2. Optional Cloud Synchronization</h2>
+      <p style="color: var(--fg-dim); line-height: 1.7; margin-bottom: 16px;">
+        If you explicitly configure and enable **Firebase Cloud Sync** in your <code>.contextlens.json</code>, individual episode metadata, file diff summaries, and recorded AI exchanges will be securely uploaded to your designated Firebase project using standard HTTPS headers. This synchronization is fully opt-in.
+      </p>
+    </section>
+
+    <section style="margin-bottom: 32px;">
+      <h2 style="font-family: var(--display); font-size: 22px; color: var(--fg); margin-bottom: 12px;">3. Keychain Security</h2>
+      <p style="color: var(--fg-dim); line-height: 1.7; margin-bottom: 16px;">
+        Your third-party LLM API keys (Gemini, OpenAI, Anthropic) are cached locally using the VS Code Secrets Storage API, which binds directly to your operating system's secure keychain vault (Keychain Access on macOS, Credential Manager on Windows, or Secret Service on Linux). They are never written to plain text configuration files.
+      </p>
+    </section>
+
+    <section style="margin-bottom: 32px;">
+      <h2 style="font-family: var(--display); font-size: 22px; color: var(--fg); margin-bottom: 12px;">4. Analytics & Telemetry</h2>
+      <p style="color: var(--fg-dim); line-height: 1.7; margin-bottom: 16px;">
+        The ContextLens marketing website uses anonymous, cookie-less web analytics (via Plausible) to track page visits and command replays. No developer credentials or personal identifiers are stored or processed.
+      </p>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="foot__cols">
+      <div>
+        <h5>Product</h5>
+        <a href="./index.html#features">Features</a>
+        <a href="./index.html#architecture">Architecture</a>
+        <a href="./mcp.html">MCP Tools</a>
+        <a href="./docs.html">Docs</a>
+      </div>
+      <div>
+        <h5>Resources</h5>
+        <a href="https://github.com/Noventra-labs/Contextlens" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/Noventra-labs/Contextlens/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a>
+        <a href="https://github.com/Noventra-labs/Contextlens/blob/main/ROADMAP.md" target="_blank" rel="noopener">Roadmap</a>
+        <a href="https://github.com/Noventra-labs/Contextlens/tree/main/examples" target="_blank" rel="noopener">Examples</a>
+      </div>
+      <div>
+        <h5>Community</h5>
+        <a href="https://github.com/Noventra-labs/Contextlens/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a>
+        <a href="https://github.com/Noventra-labs/Contextlens/blob/main/CODE_OF_CONDUCT.md" target="_blank" rel="noopener">Code of Conduct</a>
+        <a href="./docs.html#security">Security</a>
+        <a href="https://github.com/Noventra-labs/Contextlens/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+      </div>
+      <div>
+        <h5>ContextLens</h5>
+        <p class="muted foot__tag">An engineering tool built by engineers.</p>
+        <p class="muted small">© 2026 Noventra Labs · MIT License · <a href="./privacy.html">Privacy Policy</a></p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>
