@@ -16,6 +16,8 @@ import { listResources, readResource } from './mcp/resources/index';
 import { listPrompts, getPrompt } from './mcp/prompts/index';
 import { NotificationManager, McpNotificationType } from './mcp/notifications/notificationManager';
 import { SessionManager } from './mcp/session/sessionManager';
+import { runHealthCheck } from './mcp/health/healthCheck';
+import { getErrorCatalog } from './mcp/errors/mcpErrors';
 
 // Import all tools — side-effect registers them into the registry
 import './mcp/tools/index';
@@ -182,6 +184,23 @@ export function startMcpServer() {
         );
         res.writeHead(200);
         res.end(JSON.stringify(state));
+        return;
+      }
+
+      // ── Health Check ────────────────────────────────────────────────────────
+
+      if (req.method === 'GET' && url.pathname === '/mcp/health') {
+        const report = await runHealthCheck();
+        res.writeHead(report.overall === 'unhealthy' ? 503 : 200);
+        res.end(JSON.stringify(report));
+        return;
+      }
+
+      // ── Error Catalog ───────────────────────────────────────────────────────
+
+      if (req.method === 'GET' && url.pathname === '/mcp/errors') {
+        res.writeHead(200);
+        res.end(JSON.stringify({ errors: getErrorCatalog() }));
         return;
       }
 
