@@ -138,10 +138,10 @@ Ask your AI client:
 │   mcp-bridge.js     │◄───HTTP─│  ├───────────────────────────┤  │
 │   (MCP Server)      │ :3012   │  │  Prompts (5 templates)    │  │
 └─────────────────────┘         │  ├───────────────────────────┤  │
-                                │  │  Security Layer            │  │
-                                │  │  ├── TokenManager          │  │
-                                │  │  ├── RateLimiter            │  │
-                                │  │  └── InputValidator         │  │
+                                │  │  Security Layer           │  │
+                                │  │  ├── TokenManager         │  │
+                                │  │  ├── RateLimiter          │  │
+                                │  │  └── InputValidator       │  │
                                 │  └───────────────────────────┘  │
                                 └─────────────────────────────────┘
 ```
