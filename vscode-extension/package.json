@@ -1,6 +1,6 @@
 {
-  "name": "contextlens-companion",
-  "displayName": "ContextLens",
+  "name": "contextlens-agent",
+  "displayName": "ContextLens - AI Context Tracker",
   "description": "AI-driven developer companion for capturing coding intent and context.",
   "version": "1.0.3",
   "publisher": "Noventra-Labs",
