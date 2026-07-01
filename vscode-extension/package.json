@@ -1,5 +1,5 @@
 {
-  "name": "contextlens",
+  "name": "contextlens-companion",
   "displayName": "ContextLens",
   "description": "AI-driven developer companion for capturing coding intent and context.",
   "version": "1.0.3",
@@ -12,7 +12,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/89Aman/ContextLens"
+    "url": "https://github.com/Noventra-Labs/ContextLens"
   },
   "engines": {
     "vscode": "^1.80.0"
